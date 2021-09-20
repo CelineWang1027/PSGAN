@@ -24,11 +24,13 @@ class HistogramLoss(nn.Module):
 
     def forward(self, input_data, target_data, mask_src, mask_tar):
         index_tmp = mask_src.unsqueeze(0).nonzero()
-        x_A_index = index_tmp[:, 2]
-        y_A_index = index_tmp[:, 3]
-        index_tmp = mask_tar.unsqueeze(0).nonzero()
-        x_B_index = index_tmp[:, 2]
-        y_B_index = index_tmp[:, 3]
+        #index_tmp = mask_src.nonzero()
+        x_A_index = index_tmp[:, 3]
+        y_A_index = index_tmp[:, 4]
+        #index_tmp = mask_tar.unsqueeze(0).nonzero()
+        index_tmp = mask_tar.nonzero()
+        x_B_index = index_tmp[:, 3]
+        y_B_index = index_tmp[:, 4]
 
         input_data = (self.de_norm(input_data) * 255).squeeze()
         target_data = (self.de_norm(target_data) * 255).squeeze()
@@ -40,5 +42,6 @@ class HistogramLoss(nn.Module):
             input_masked, target_masked,
             [x_A_index, y_A_index, x_B_index, y_B_index])
         input_match = self.to_var(input_match, requires_grad=False)
-        loss = F.l1_loss(input_masked, input_match)
+        loss = F.mse_loss(input_masked, input_match)
+        #loss = F.l1_loss(input_masked, input_match)
         return loss

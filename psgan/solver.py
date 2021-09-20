@@ -21,13 +21,17 @@ import tools.plot as plot_fig
 from . import net
 from .preprocess import PreProcess
 from concern.track import Track
+import torchvision.models as models
+
 
 
 class Solver(Track):
     def __init__(self, config, device="cpu", data_loader=None, inference=False):
         self.G = net.Generator()
         if inference:
-            self.G.load_state_dict(torch.load(inference, map_location=torch.device(device)))
+            #self.G.load_state_dict(torch.load(inference, map_location=torch.device(device)))
+            self.G.load_state_dict({k.replace('module.', ''): v for k, v in \
+                                    torch.load(inference, map_location=torch.device(device)).items()})
             self.G = self.G.to(device).eval()
             return
 
@@ -38,7 +42,7 @@ class Solver(Track):
         self.snapshot_path = os.path.join(self.log_path, config.LOG.SNAPSHOT_PATH)
         self.log_step = config.LOG.LOG_STEP
         self.vis_step = config.LOG.VIS_STEP
-        self.snapshot_step = config.LOG.SNAPSHOT_STEP // torch.cuda.device_count()
+        self.snapshot_step = config.LOG.SNAPSHOT_STEP #// torch.cuda.device_count()
 
         # Data loader
         self.data_loader_train = data_loader
@@ -105,7 +109,8 @@ class Solver(Track):
         self.criterionL2 = torch.nn.MSELoss()
         self.criterionGAN = GANLoss(use_lsgan=True, tensor=torch.cuda.FloatTensor)
 
-        self.vgg = net.vgg16(pretrained=True)
+        #self.vgg = net.vgg16(pretrained=True)
+        self.vgg = models.vgg16(pretrained=True)
         self.criterionHis = HistogramLoss()
 
         # Optimizers
@@ -139,6 +144,18 @@ class Solver(Track):
             self.criterionL2.cuda()
             self.D_A.cuda()
             self.D_B.cuda()
+
+    def vgg_forward(self, model, x):
+        #print('the features of ptrtrained vgg16 model is')
+        features = torch.nn.Sequential(*list(model.children())[:28])
+        #print(feature)
+        #print('the kets of ptrtrained vgg16 model is')
+        #print(model._modules.keys())
+        #for i in range(18):
+        #    x = model.features[i](x)
+        #output the features extracted by 0-28 layers of pretrained vgg16
+        x = features(x)
+        return x
 
     def load_checkpoint(self):
         G_path = os.path.join(self.checkpoint, 'G.pth')
@@ -292,7 +309,7 @@ class Solver(Track):
                     ) * self.lambda_his_skin
                     g_A_loss_his += g_A_skin_loss_his
                     g_B_loss_his += g_B_skin_loss_his
-
+                    
                     g_A_eye_loss_his = self.criterionHis(
                         fake_A, image_r, mask_s[:, 2], mask_r[:, 2]
                     ) * self.lambda_his_eye
@@ -313,6 +330,7 @@ class Solver(Track):
                     # self.track("Generator recover")
 
                     # vgg loss
+                    """
                     vgg_s = self.vgg(image_s)
                     vgg_s = Variable(vgg_s.data).detach()
                     vgg_fake_A = self.vgg(fake_A)
@@ -322,6 +340,16 @@ class Solver(Track):
                     vgg_r = self.vgg(image_r)
                     vgg_r = Variable(vgg_r.data).detach()
                     vgg_fake_B = self.vgg(fake_B)
+                    g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
+                    """
+                    vgg_s = self.vgg_forward(self.vgg, image_s)
+                    vgg_s = Variable(vgg_s.data).detach()
+                    vgg_fake_A = self.vgg_forward(self.vgg, fake_A)
+                    g_loss_A_vgg = self.criterionL2(vgg_fake_A, vgg_s) * self.lambda_A * self.lambda_vgg
+
+                    vgg_r = self.vgg_forward(self.vgg, image_r)
+                    vgg_r = Variable(vgg_r.data).detach()
+                    vgg_fake_B = self.vgg_forward(self.vgg, fake_B)
                     g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
 
                     loss_rec = (g_loss_rec_A + g_loss_rec_B + g_loss_A_vgg + g_loss_B_vgg) * 0.5
@@ -338,16 +366,21 @@ class Solver(Track):
 
                     # Logging
                     self.loss['G-A-loss-adv'] = g_A_loss_adv.mean().item()
-                    self.loss['G-B-loss-adv'] = g_A_loss_adv.mean().item()
-                    self.loss['G-loss-org'] = g_loss_rec_A.mean().item()
-                    self.loss['G-loss-ref'] = g_loss_rec_B.mean().item()
+                    self.loss['G-B-loss-adv'] = g_B_loss_adv.mean().item()
+                    self.loss['g-loss-rec-A'] = g_loss_rec_A.mean().item()
+                    self.loss['g-loss-rec-B'] = g_loss_rec_B.mean().item()
                     self.loss['G-loss-idt'] = loss_idt.mean().item()
                     self.loss['G-loss-img-rec'] = (g_loss_rec_A + g_loss_rec_B).mean().item()
                     self.loss['G-loss-vgg-rec'] = (g_loss_A_vgg + g_loss_B_vgg).mean().item()
-                    self.loss['G-loss-img-rec'] = g_loss_rec_A.mean().item()
-                    self.loss['G-loss-vgg-rec'] = g_loss_A_vgg.mean().item()
 
+                    self.loss['G-A-lip-loss-his'] = g_A_lip_loss_his.mean().item()
+                    self.loss['G-B-lip-loss-his'] = g_B_lip_loss_his.mean().item()
+                    self.loss['G-A-skin-loss-his'] = g_A_skin_loss_his.mean().item()
+                    self.loss['G-B-skin-loss-his'] = g_B_skin_loss_his.mean().item()
+                    self.loss['G-A-eye-loss-his'] = g_A_eye_loss_his.mean().item()
+                    self.loss['G-B-eye-loss-his'] = g_B_eye_loss_his.mean().item()
                     self.loss['G-A-loss-his'] = g_A_loss_his.mean().item()
+                    self.loss['G-B-loss-his'] = g_B_loss_his.mean().item()
 
 
                 # Print out log info
@@ -361,10 +394,18 @@ class Solver(Track):
                 #save the images
                 if (self.i) % self.vis_step == 0:
                     print("Saving middle output...")
-                    self.vis_train([image_s, image_r, fake_A, rec_A, mask_s[:, :, 0], mask_r[:, :, 0]])
+                    #self.vis_train([image_s, image_r, fake_A, rec_A, mask_s[:, :, 0], mask_r[:, :, 0]])
+                    self.vis_train_transferred([fake_A])
+                    self.vis_train_recon_source([rec_A])
+                    self.vis_train_recon_ref([rec_B])
+                    self.vis_train_2TimeSource([idt_A])
+                    self.vis_train_2TimeRef([idt_B])
 
                 # Save model checkpoints
                 if (self.i) % self.snapshot_step == 0:
+                    self.save_models()
+
+                if self.e == self.num_epochs and self.i == len(self.data_loader_train):
                     self.save_models()
 
                 if (self.i % 100 == 99):
@@ -402,7 +443,7 @@ class Solver(Track):
             self.D_B.state_dict(),
             os.path.join(
                 self.snapshot_path, '{}_{}_D_B.pth'.format(self.e + 1, self.i + 1)))
-
+    '''
     def vis_train(self, img_train_list):
         # saving training results
         mode = "train_vis"
@@ -412,6 +453,56 @@ class Solver(Track):
             os.makedirs(result_path_train)
         save_path = os.path.join(result_path_train, '{}_{}_fake.jpg'.format(self.e, self.i))
         save_image(self.de_norm(img_train_list.data), save_path, normalize=True)
+    '''
+    def vis_train_transferred(self, img_train_list):
+        #saving transfer results
+        mode = "train_vis"
+        img_train_list = torch.cat(img_train_list, dim=3)
+        result_path_train = osp.join(self.result_path, mode)
+        if not osp.exists(result_path_train):
+            os.makedirs(result_path_train)
+        save_path = os.path.join(result_path_train, '{}_{}_transferred.jpg'.format(self.e, self.i))
+        save_image(self.de_norm(img_train_list), save_path, normalize=True)
+
+    def vis_train_recon_source(self, img_train_list):
+        #saving reconstructed source images
+        mode = "train_vis"
+        img_train_list = torch.cat(img_train_list, dim=3)
+        result_path_train = osp.join(self.result_path, mode)
+        if not osp.exists(result_path_train):
+            os.makedirs(result_path_train)
+        save_path = os.path.join(result_path_train, '{}_{}_ReconSource.jpg'.format(self.e, self.i))
+        save_image(self.de_norm(img_train_list), save_path, normalize=True)
+
+    def vis_train_recon_ref(self, img_train_list):
+        #saving reconstructed reference images
+        mode = "train_vis"
+        img_train_list = torch.cat(img_train_list, dim=3)
+        result_path_train = osp.join(self.result_path, mode)
+        if not osp.exists(result_path_train):
+            os.makedirs(result_path_train)
+        save_path = os.path.join(result_path_train, '{}_{}_ReconRef.jpg'.format(self.e, self.i))
+        save_image(self.de_norm(img_train_list), save_path, normalize=True)
+
+    def vis_train_2TimeSource(self, img_train_list):
+        #saving G(s, s)results
+        mode = "train_vis"
+        img_train_list = torch.cat(img_train_list, dim=3)
+        result_path_train = osp.join(self.result_path, mode)
+        if not osp.exists(result_path_train):
+            os.makedirs(result_path_train)
+        save_path = os.path.join(result_path_train, '{}_{}_2TimeSource.jpg'.format(self.e, self.i))
+        save_image(self.de_norm(img_train_list), save_path, normalize=True)
+
+    def vis_train_2TimeRef(self, img_train_list):
+        #saving G(r, r)results
+        mode = "train_vis"
+        img_train_list = torch.cat(img_train_list, dim=3)
+        result_path_train = osp.join(self.result_path, mode)
+        if not osp.exists(result_path_train):
+            os.makedirs(result_path_train)
+        save_path = os.path.join(result_path_train, '{}_{}_2TimeRef.jpg'.format(self.e, self.i))
+        save_image(self.de_norm(img_train_list), save_path, normalize=True)
 
     def log_terminal(self):
         elapsed = time.time() - self.start_time
