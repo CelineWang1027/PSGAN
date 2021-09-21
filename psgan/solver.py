@@ -147,7 +147,7 @@ class Solver(Track):
             self.D_A.cuda()
             self.D_B.cuda()
 
-    def vgg_forward_back(self, model, x):
+    def vgg_forward(self, model, x):
         # print('the features of ptrtrained vgg16 model is')
         features = torch.nn.Sequential(*list(model.children())[:28])
         # print(feature)
@@ -158,11 +158,6 @@ class Solver(Track):
         # output the features extracted by 0-28 layers of pretrained vgg16
         x = features(x)
         return x
-
-    def vgg_forward(self, model, x):
-        model.classifier = torch.nn.Dropout()
-        feature = model(x)
-        return feature
 
 
     '''
