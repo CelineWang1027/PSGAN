@@ -23,7 +23,7 @@ from . import net
 from .preprocess import PreProcess
 from concern.track import Track
 import torchvision.models as models
-from utils import vgg_preprocess
+#from utils import vgg_preprocess
 
 
 class Solver(Track):
@@ -167,14 +167,14 @@ class Solver(Track):
 
     '''
     define the function to calculate vgg loss extracted by vgg16
-    '''
+    
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)
         target_vgg = vgg_preprocess(target)
         img_fea = vgg(img_vgg)
         target_fea = vgg(target_vgg)
         return torch.mean(torch.abs(img_fea - target_fea))
-
+    '''
     def load_checkpoint(self):
         G_path = os.path.join(self.checkpoint, 'G.pth')
         if os.path.exists(G_path):
