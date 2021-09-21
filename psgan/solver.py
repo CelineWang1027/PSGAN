@@ -145,17 +145,12 @@ class Solver(Track):
             self.D_A.cuda()
             self.D_B.cuda()
 
+
+
     def vgg_forward(self, model, x):
-        #print('the features of ptrtrained vgg16 model is')
-        features = torch.nn.Sequential(*list(model.children())[:28])
-        #print(feature)
-        #print('the kets of ptrtrained vgg16 model is')
-        #print(model._modules.keys())
-        #for i in range(18):
-        #    x = model.features[i](x)
-        #output the features extracted by 0-28 layers of pretrained vgg16
-        x = features(x)
-        return x
+        model.classifier = torch.nn.Dropout()
+        feature = model(x)
+        return feature
 
     def load_checkpoint(self):
         G_path = os.path.join(self.checkpoint, 'G.pth')
