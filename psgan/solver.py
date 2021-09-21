@@ -2,6 +2,7 @@
 # -*- encoding: utf-8 -*-
 import os
 import os.path as osp
+
 pwd = osp.split(osp.realpath(__file__))[0]
 
 import time
@@ -22,14 +23,14 @@ from . import net
 from .preprocess import PreProcess
 from concern.track import Track
 import torchvision.models as models
-
+from utils import vgg_preprocess
 
 
 class Solver(Track):
     def __init__(self, config, device="cpu", data_loader=None, inference=False):
         self.G = net.Generator()
         if inference:
-            #self.G.load_state_dict(torch.load(inference, map_location=torch.device(device)))
+            # self.G.load_state_dict(torch.load(inference, map_location=torch.device(device)))
             self.G.load_state_dict({k.replace('module.', ''): v for k, v in \
                                     torch.load(inference, map_location=torch.device(device)).items()})
             self.G = self.G.to(device).eval()
@@ -42,7 +43,7 @@ class Solver(Track):
         self.snapshot_path = os.path.join(self.log_path, config.LOG.SNAPSHOT_PATH)
         self.log_step = config.LOG.LOG_STEP
         self.vis_step = config.LOG.VIS_STEP
-        self.snapshot_step = config.LOG.SNAPSHOT_STEP #// torch.cuda.device_count()
+        self.snapshot_step = config.LOG.SNAPSHOT_STEP  # // torch.cuda.device_count()
 
         # Data loader
         self.data_loader_train = data_loader
@@ -56,14 +57,13 @@ class Solver(Track):
         self.beta1 = config.TRAINING.BETA1
         self.beta2 = config.TRAINING.BETA2
 
-        self.lambda_idt      = config.LOSS.LAMBDA_IDT
-        self.lambda_A        = config.LOSS.LAMBDA_A
-        self.lambda_B        = config.LOSS.LAMBDA_B
-        self.lambda_his_lip  = config.LOSS.LAMBDA_HIS_LIP
+        self.lambda_idt = config.LOSS.LAMBDA_IDT
+        self.lambda_A = config.LOSS.LAMBDA_A
+        self.lambda_B = config.LOSS.LAMBDA_B
+        self.lambda_his_lip = config.LOSS.LAMBDA_HIS_LIP
         self.lambda_his_skin = config.LOSS.LAMBDA_HIS_SKIN
-        self.lambda_his_eye  = config.LOSS.LAMBDA_HIS_EYE
-        self.lambda_vgg      = config.LOSS.LAMBDA_VGG
-
+        self.lambda_his_eye = config.LOSS.LAMBDA_HIS_EYE
+        self.lambda_vgg = config.LOSS.LAMBDA_VGG
 
         # Hyper-parameteres
         self.d_conv_dim = config.MODEL.D_CONV_DIM
@@ -109,14 +109,16 @@ class Solver(Track):
         self.criterionL2 = torch.nn.MSELoss()
         self.criterionGAN = GANLoss(use_lsgan=True, tensor=torch.cuda.FloatTensor)
 
-        #self.vgg = net.vgg16(pretrained=True)
+        # self.vgg = net.vgg16(pretrained=True)
         self.vgg = models.vgg16(pretrained=True)
         self.criterionHis = HistogramLoss()
 
         # Optimizers
         self.g_optimizer = torch.optim.Adam(self.G.parameters(), self.g_lr, [self.beta1, self.beta2])
-        self.d_A_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.D_A.parameters()), self.d_lr, [self.beta1, self.beta2])
-        self.d_B_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.D_B.parameters()), self.d_lr, [self.beta1, self.beta2])
+        self.d_A_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.D_A.parameters()), self.d_lr,
+                                              [self.beta1, self.beta2])
+        self.d_B_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.D_B.parameters()), self.d_lr,
+                                              [self.beta1, self.beta2])
 
         # Print networks
         self.print_network(self.G, 'G')
@@ -145,17 +147,33 @@ class Solver(Track):
             self.D_A.cuda()
             self.D_B.cuda()
 
-    def vgg_forward(self, model, x):
-        #print('the features of ptrtrained vgg16 model is')
+    def vgg_forward_back(self, model, x):
+        # print('the features of ptrtrained vgg16 model is')
         features = torch.nn.Sequential(*list(model.children())[:28])
-        #print(feature)
-        #print('the kets of ptrtrained vgg16 model is')
-        #print(model._modules.keys())
-        #for i in range(18):
+        # print(feature)
+        # print('the kets of ptrtrained vgg16 model is')
+        # print(model._modules.keys())
+        # for i in range(18):
         #    x = model.features[i](x)
-        #output the features extracted by 0-28 layers of pretrained vgg16
+        # output the features extracted by 0-28 layers of pretrained vgg16
         x = features(x)
         return x
+
+    def vgg_forward(self, model, x):
+        model.classifier = torch.nn.Dropout()
+        feature = model(x)
+        return feature
+
+
+    '''
+    define the function to calculate vgg loss extracted by vgg16
+    '''
+    def compute_vgg_loss(self, vgg, img, target):
+        img_vgg = vgg_preprocess(img)
+        target_vgg = vgg_preprocess(target)
+        img_fea = vgg(img_vgg)
+        target_fea = vgg(target_vgg)
+        return torch.mean(torch.abs(img_fea - target_fea))
 
     def load_checkpoint(self):
         G_path = os.path.join(self.checkpoint, 'G.pth')
@@ -172,7 +190,7 @@ class Solver(Track):
             self.D_B.load_state_dict(torch.load(D_B_path))
             print('loaded trained discriminator B {}..!'.format(D_B_path))
 
-    def generate(self, org_A, ref_B, lms_A=None, lms_B=None, mask_A=None, mask_B=None, 
+    def generate(self, org_A, ref_B, lms_A=None, lms_B=None, mask_A=None, mask_B=None,
                  diff_A=None, diff_B=None, gamma=None, beta=None, ret=False):
         """org_A is content, ref_B is style"""
         res = self.G(org_A, ref_B, mask_A, mask_B, diff_A, diff_B, gamma, beta, ret)
@@ -184,9 +202,9 @@ class Solver(Track):
     def test(self, real_A, mask_A, diff_A, real_B, mask_B, diff_B):
         cur_prama = None
         with torch.no_grad():
-            cur_prama = self.generate(real_A, real_B, None, None, mask_A, mask_B, 
+            cur_prama = self.generate(real_A, real_B, None, None, mask_A, mask_B,
                                       diff_A, diff_B, ret=True)
-            fake_A = self.generate(real_A, real_B, None, None, mask_A, mask_B, 
+            fake_A = self.generate(real_A, real_B, None, None, mask_A, mask_B,
                                    diff_A, diff_B, gamma=cur_prama[0], beta=cur_prama[1])
         fake_A = fake_A.squeeze(0)
 
@@ -208,7 +226,7 @@ class Solver(Track):
             for self.i, (source_input, reference_input) in enumerate(self.data_loader_train):
                 # image, mask, dist
                 image_s, image_r = source_input[0].to(self.device), reference_input[0].to(self.device)
-                mask_s, mask_r = source_input[1].to(self.device), reference_input[1].to(self.device) 
+                mask_s, mask_r = source_input[1].to(self.device), reference_input[1].to(self.device)
                 dist_s, dist_r = source_input[2].to(self.device), reference_input[2].to(self.device)
                 self.track("data")
 
@@ -225,7 +243,7 @@ class Solver(Track):
                 fake_A = Variable(fake_A.data).detach()
                 out = self.D_A(fake_A)
                 self.track("D_A_2")
-                d_loss_fake =  self.criterionGAN(out, False)
+                d_loss_fake = self.criterionGAN(out, False)
                 self.track("D_A_loss_2")
 
                 # Backward + Optimize
@@ -248,7 +266,7 @@ class Solver(Track):
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
                 out = self.D_B(fake_B)
-                d_loss_fake =  self.criterionGAN(out, False)
+                d_loss_fake = self.criterionGAN(out, False)
 
                 # Backward + Optimize
                 d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
@@ -260,12 +278,12 @@ class Solver(Track):
                 self.loss['D-B-loss_real'] = d_loss_real.mean().item()
 
                 # self.track("Discriminator backward")
-               
+
                 # ================== Train G ================== #
                 if (self.i + 1) % self.g_step == 0:
                     # identity loss
                     assert self.lambda_idt > 0
-                    
+
                     # G should be identity if ref_B or org_A is fed
                     idt_A = self.G(image_s, image_s, mask_s, mask_s, dist_s, dist_s)
                     idt_B = self.G(image_r, image_r, mask_r, mask_r, dist_r, dist_r)
@@ -277,7 +295,7 @@ class Solver(Track):
                     # self.track("Identical")
 
                     # GAN loss D_A(G_A(A))
-                    # fake_A in class B, 
+                    # fake_A in class B,
                     fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
                     pred_fake = self.D_A(fake_A)
                     g_A_loss_adv = self.criterionGAN(pred_fake, True)
@@ -309,7 +327,7 @@ class Solver(Track):
                     ) * self.lambda_his_skin
                     g_A_loss_his += g_A_skin_loss_his
                     g_B_loss_his += g_B_skin_loss_his
-                    
+
                     g_A_eye_loss_his = self.criterionHis(
                         fake_A, image_r, mask_s[:, 2], mask_r[:, 2]
                     ) * self.lambda_his_eye
@@ -382,19 +400,18 @@ class Solver(Track):
                     self.loss['G-A-loss-his'] = g_A_loss_his.mean().item()
                     self.loss['G-B-loss-his'] = g_B_loss_his.mean().item()
 
-
                 # Print out log info
                 if (self.i + 1) % self.log_step == 0:
                     self.log_terminal()
 
-                #plot the figures
+                # plot the figures
                 for key_now in self.loss.keys():
                     plot_fig.plot(key_now, self.loss[key_now])
 
-                #save the images
+                # save the images
                 if (self.i) % self.vis_step == 0:
                     print("Saving middle output...")
-                    #self.vis_train([image_s, image_r, fake_A, rec_A, mask_s[:, :, 0], mask_r[:, :, 0]])
+                    # self.vis_train([image_s, image_r, fake_A, rec_A, mask_s[:, :, 0], mask_r[:, :, 0]])
                     self.vis_train_transferred([fake_A])
                     self.vis_train_recon_source([rec_A])
                     self.vis_train_recon_ref([rec_B])
@@ -414,7 +431,7 @@ class Solver(Track):
                 plot_fig.tick()
 
             # Decay learning rate
-            if (self.e+1) > (self.num_epochs - self.num_epochs_decay):
+            if (self.e + 1) > (self.num_epochs - self.num_epochs_decay):
                 g_lr -= (self.g_lr / float(self.num_epochs_decay))
                 d_lr -= (self.d_lr / float(self.num_epochs_decay))
                 self.update_lr(g_lr, d_lr)
@@ -443,6 +460,7 @@ class Solver(Track):
             self.D_B.state_dict(),
             os.path.join(
                 self.snapshot_path, '{}_{}_D_B.pth'.format(self.e + 1, self.i + 1)))
+
     '''
     def vis_train(self, img_train_list):
         # saving training results
@@ -454,8 +472,9 @@ class Solver(Track):
         save_path = os.path.join(result_path_train, '{}_{}_fake.jpg'.format(self.e, self.i))
         save_image(self.de_norm(img_train_list.data), save_path, normalize=True)
     '''
+
     def vis_train_transferred(self, img_train_list):
-        #saving transfer results
+        # saving transfer results
         mode = "train_vis"
         img_train_list = torch.cat(img_train_list, dim=3)
         result_path_train = osp.join(self.result_path, mode)
@@ -465,7 +484,7 @@ class Solver(Track):
         save_image(self.de_norm(img_train_list), save_path, normalize=True)
 
     def vis_train_recon_source(self, img_train_list):
-        #saving reconstructed source images
+        # saving reconstructed source images
         mode = "train_vis"
         img_train_list = torch.cat(img_train_list, dim=3)
         result_path_train = osp.join(self.result_path, mode)
@@ -475,7 +494,7 @@ class Solver(Track):
         save_image(self.de_norm(img_train_list), save_path, normalize=True)
 
     def vis_train_recon_ref(self, img_train_list):
-        #saving reconstructed reference images
+        # saving reconstructed reference images
         mode = "train_vis"
         img_train_list = torch.cat(img_train_list, dim=3)
         result_path_train = osp.join(self.result_path, mode)
@@ -485,7 +504,7 @@ class Solver(Track):
         save_image(self.de_norm(img_train_list), save_path, normalize=True)
 
     def vis_train_2TimeSource(self, img_train_list):
-        #saving G(s, s)results
+        # saving G(s, s)results
         mode = "train_vis"
         img_train_list = torch.cat(img_train_list, dim=3)
         result_path_train = osp.join(self.result_path, mode)
@@ -495,7 +514,7 @@ class Solver(Track):
         save_image(self.de_norm(img_train_list), save_path, normalize=True)
 
     def vis_train_2TimeRef(self, img_train_list):
-        #saving G(r, r)results
+        # saving G(r, r)results
         mode = "train_vis"
         img_train_list = torch.cat(img_train_list, dim=3)
         result_path_train = osp.join(self.result_path, mode)
@@ -509,7 +528,7 @@ class Solver(Track):
         elapsed = str(datetime.timedelta(seconds=elapsed))
 
         log = "Elapsed [{}], Epoch [{}/{}], Iter [{}/{}]".format(
-            elapsed, self.e+1, self.num_epochs, self.i+1, self.iters_per_epoch)
+            elapsed, self.e + 1, self.num_epochs, self.i + 1, self.iters_per_epoch)
 
         for tag, value in self.loss.items():
             log += ", {}: {:.4f}".format(tag, value)

@@ -27,8 +27,8 @@ class HistogramLoss(nn.Module):
         #index_tmp = mask_src.nonzero()
         x_A_index = index_tmp[:, 3]
         y_A_index = index_tmp[:, 4]
-        #index_tmp = mask_tar.unsqueeze(0).nonzero()
-        index_tmp = mask_tar.nonzero()
+        index_tmp = mask_tar.unsqueeze(0).nonzero()
+        #index_tmp = mask_tar.nonzero()
         x_B_index = index_tmp[:, 3]
         y_B_index = index_tmp[:, 4]
 
