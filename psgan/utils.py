@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from . import resnet
+import pickle
+
 
 def load_resnet50(model_dir):
     model = resnet.resnet50()
