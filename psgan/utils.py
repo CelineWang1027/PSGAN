@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from . import resnet
 import pickle
+from torch.autograd import Variable
 
 
 def load_resnet50(model_dir):
