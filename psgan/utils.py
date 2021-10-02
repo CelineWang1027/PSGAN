@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import resnet
+from . import resnet
 
 def load_resnet50(model_dir):
     model = resnet.resnet50()

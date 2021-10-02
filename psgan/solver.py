@@ -23,7 +23,7 @@ from . import net
 from .preprocess import PreProcess
 from concern.track import Track
 import torchvision.models as models
-from utils import vgg_preprocess, load_resnet50
+from .utils import vgg_preprocess, load_resnet50
 
 
 class Solver(Track):
