@@ -373,18 +373,18 @@ class Solver(Track):
                     vgg_fake_B = self.vgg(fake_B)
                     g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
                     """
-                    vgg_s = self.vgg_forward(self.vgg, image_s)
-                    vgg_s = Variable(vgg_s.data).detach()
-                    vgg_fake_A = self.vgg_forward(self.vgg, fake_A)
+                    #vgg_s = self.vgg_forward(self.vgg, image_s)
+                    #vgg_s = Variable(vgg_s.data).detach()
+                    #vgg_fake_A = self.vgg_forward(self.vgg, fake_A)
                     #g_loss_A_vgg = self.criterionL2(vgg_fake_A, vgg_s) * self.lambda_A * self.lambda_vgg
-                    g_loss_A_vgg = self.compute_vgg_loss(self.vgg, fake_A, image_s)
+                    g_loss_A_vgg = self.compute_vgg_loss(self.vgg, fake_A, image_s) * self.lambda_A * self.lambda_vgg
 
 
-                    vgg_r = self.vgg_forward(self.vgg, image_r)
-                    vgg_r = Variable(vgg_r.data).detach()
-                    vgg_fake_B = self.vgg_forward(self.vgg, fake_B)
+                    #vgg_r = self.vgg_forward(self.vgg, image_r)
+                    #vgg_r = Variable(vgg_r.data).detach()
+                    #vgg_fake_B = self.vgg_forward(self.vgg, fake_B)
                     #g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
-                    g_loss_B_vgg = self.compute_vgg_loss(self.vgg, fake_B, image_r)
+                    g_loss_B_vgg = self.compute_vgg_loss(self.vgg, fake_B, image_r) * self.lambda_A * self.lambda_vgg
 
                     loss_rec = (g_loss_rec_A + g_loss_rec_B + g_loss_A_vgg + g_loss_B_vgg) * 0.5
                     # loss_rec = (g_loss_rec_A + g_loss_A_vgg) * 0.5
