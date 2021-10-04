@@ -42,6 +42,6 @@ class HistogramLoss(nn.Module):
             input_masked, target_masked,
             [x_A_index, y_A_index, x_B_index, y_B_index])
         input_match = self.to_var(input_match, requires_grad=False)
-        loss = F.mse_loss(input_masked, input_match)
-        #loss = F.l1_loss(input_masked, input_match)
+        #loss = F.mse_loss(input_masked, input_match)
+        loss = F.l1_loss(input_masked, input_match)
         return loss
