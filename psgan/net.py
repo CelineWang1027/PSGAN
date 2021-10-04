@@ -317,7 +317,7 @@ class Discriminator(nn.Module):
         #out_real = self.conv1(h)
         out_makeup = self.conv1(h)
         #return out_real.squeeze(), out_makeup.squeeze()
-        return out_makeup
+        return out_makeup.squeeze()
 
 class VGG(nn.Module):
     def __init__(self, pool='max'):
