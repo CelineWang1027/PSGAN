@@ -69,7 +69,7 @@ class NONLocalBlock2D(nn.Module):
         y = y.view(batch_size, 1, *source.size()[2:])
         return y
 
-
+'''
 class Generator(nn.Module, Track):
     """Generator. Encoder-Decoder Architecture."""
     def __init__(self):
@@ -268,7 +268,122 @@ class Generator(nn.Module, Track):
 
         c_tnet = self.tnet_out(c_tnet)
         return c_tnet
+'''
+#also called MANet
+class Generator(nn.Module):
+    #Encoder-Decoder architecture
+    def __init__(self, conv_dim=64, repeat_num=6):
+        super(Generator, self).__init__()
 
+        encoder_layers = []
+        encoder_layers.append(nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False))
+        encoder_layers.append(nn.InstanceNorm2d(conv_dim, affine=False))
+        encoder_layers.append(nn.ReLU(inplace=True))
+
+        #Down-sampling
+        curr_dim = conv_dim
+        for i in range(2):
+            encoder_layers.append(nn.Conv2d(curr_dim, curr_dim * 2, kernel_size=4, stride=2, padding=1, bias=False))
+            encoder_layers.append(nn.InstanceNorm2d(curr_dim * 2, affine=False))
+            encoder_layers.append(nn.ReLU(inplace=True))
+            curr_dim = scripts * 2
+
+        #Bottleneck
+        for i in range(3):
+            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+
+        decoder_layers = []
+        for i in range(3):
+            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+
+        #Up-Sampling
+        for i in range(2):
+            decoder_layers.append(nn.ConvTranspose2d(curr_dim, curr_dim // 2, kernel_size=4, stride=2, padding=1, bias=False))
+            decoder_layers.append(nn.InstanceNorm2d(curr_dim // 2, affine=True))
+            decoder_layers.append(nn.ReLU(inplace=True))
+            curr_dim = curr_dim // 2
+
+        decoder_layers.append(nn.Conv2d(curr_dim, 3, kernel_size=3, stride=1, padding=3, bias=False))
+        decoder_layers.append(nn.Tanh())
+
+        self.encoder = nn.Sequential(*encoder_layers)
+        self.decoder = nn.Sequential(*decoder_layers)
+        self.MDNet = MDNet()
+        self.AMM = AMM()
+
+    def forward(self, source_image, reference_image):
+        fm_source = self.encoder(source_image)
+        fm_reference = self.MDNet(reference_image)
+        morphed_fm = self.AMM(fm_source, fm_reference)
+        result = self.decoder(morphed_fm)
+        return result
+
+class MDNet(nn.Module):
+    '''
+    Encoder-bottleneck
+    '''
+    def __init__(self, conv_dim=64, repeat_num=3):
+        super(MDNet, self).__init__()
+
+        layers = []
+        layers.append(nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False))
+        layers.append(nn.InstanceNorm2d(conv_dim, affine=True))
+        layers.append(nn.ReLU(inplace=True))
+
+        curr_dim = conv_dim
+        #Down-sampling
+        for i in range(2):
+            layers.append(nn.Conv2d(curr_dim, curr_dim * 2, kernel_size=4, stride=2, padding=1, bias=False))
+            layers.append(nn.InstanceNorm2d(curr_dim * 2, affine=True))
+            layers.append(nn.ReLU(inplace=True))
+            curr_dim = curr_dim * 2
+
+        #Bottleneck
+        for i in range(repeat_num):
+            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+        self.main = nn.Sequential(*layers)
+
+    def forward(self, reference_image):
+        fm_reference = self.main(reference_image)
+        return fm_reference
+
+class AMM(nn.Module):
+    def __init__(self):
+        super(AMM, self).__init__()
+        self.visual_feature_weight = 0.01
+        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, fm_source, fm_reference):
+        batch_size, channels, width, height = fm_reference.size()
+        '''
+        get makeup matrices->g(x) to reference image
+        '''
+        old_lambda_matrix = self.lambda_matrix_conv(fm_reference).view(batch_size, -1, width * height)
+        old_beta_matrux = self.beta_matrix_conv(fm_reference).view(batch_size, -1, width * height)
+        '''
+        proj_query-------fm_source
+        query the influence from all the pixels in reference image(to one pixel in source image) 
+        proj_key---------fm_reference
+        '''
+        temp_fm_reference = fm_reference.view(batch_size, -1, height * width)
+        temp_fm_source = fm_source.view(batch_size, -1, height * width).permute(0, 2, 1)
+
+        energy = torch.bmm(temp_fm_source, temp_fm_reference)
+        attention_map = self.softmax(energy)
+
+        new_lambda_matrix = torch.bmm(old_lambda_matrix, attention_map.permute(0, 2, 1))
+        new_beta_matrix = torch.bmm(old_beta_matrux, attention_map.permute(0, 2, 1))
+        new_lambda_matrix = new_lambda_matrix.view(batch_size, 1, width, height)
+        new_beta_matrix = new_beta_matrix.view(batch_size, 1, width, height)
+
+        lambda_tensor = new_lambda_matrix.expand(batch_size, 256, width, height)
+        beta_tensor = new_beta_matrix.expand(batch_size, 256, width, height)
+        morphed_fm_source = torch.mul(lambda_tensor, fm_source)
+        morphed_fm_source = torch.add(morphed_fm_source, beta_tensor)
+
+        return morphed_fm_source
 
 class Discriminator(nn.Module):
     """Discriminator. PatchGAN."""
