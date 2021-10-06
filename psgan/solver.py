@@ -23,7 +23,7 @@ from . import net
 from .preprocess import PreProcess
 from concern.track import Track
 import torchvision.models as models
-#from utils import vgg_preprocess
+from .utils import vgg_preprocess, load_resnet50
 
 
 class Solver(Track):
@@ -110,7 +110,16 @@ class Solver(Track):
         self.criterionGAN = GANLoss(use_lsgan=True, tensor=torch.cuda.FloatTensor)
 
         # self.vgg = net.vgg16(pretrained=True)
-        self.vgg = models.vgg16(pretrained=True)
+        #self.vgg = models.vgg16(pretrained=True)
+        '''
+        redefine self.vgg
+        '''
+        #load VGGFace model
+        self.vgg = load_resnet50("./resnet50_ft_weight.pkl")
+        self.vgg.eval()
+        self.vgg.fc.reset_parameters()
+        for param in self.vgg.parameters():
+            param.requires_grad = False
         self.criterionHis = HistogramLoss()
 
         # Optimizers
@@ -147,6 +156,7 @@ class Solver(Track):
             self.D_A.cuda()
             self.D_B.cuda()
 
+
     def vgg_forward(self, model, x):
         # print('the features of ptrtrained vgg16 model is')
         features = torch.nn.Sequential(*list(model.children())[:28])
@@ -158,6 +168,14 @@ class Solver(Track):
         # output the features extracted by 0-28 layers of pretrained vgg16
         x = features(x)
         return x
+
+    #define how to calculate vgg loss
+    def compute_vgg_loss(self, vgg, img, target):
+        img_vgg = vgg_preprocess(img)
+        target_vgg = vgg_preprocess(target)
+        img_fea = vgg(img_vgg)
+        target_fea = vgg(target_vgg)
+        return torch.mean(torch.abs(img_fea - target_fea))
 
 
     '''
@@ -355,15 +373,18 @@ class Solver(Track):
                     vgg_fake_B = self.vgg(fake_B)
                     g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
                     """
-                    vgg_s = self.vgg_forward(self.vgg, image_s)
-                    vgg_s = Variable(vgg_s.data).detach()
-                    vgg_fake_A = self.vgg_forward(self.vgg, fake_A)
-                    g_loss_A_vgg = self.criterionL2(vgg_fake_A, vgg_s) * self.lambda_A * self.lambda_vgg
+                    #vgg_s = self.vgg_forward(self.vgg, image_s)
+                    #vgg_s = Variable(vgg_s.data).detach()
+                    #vgg_fake_A = self.vgg_forward(self.vgg, fake_A)
+                    #g_loss_A_vgg = self.criterionL2(vgg_fake_A, vgg_s) * self.lambda_A * self.lambda_vgg
+                    g_loss_A_vgg = self.compute_vgg_loss(self.vgg, fake_A, image_s) * self.lambda_A * self.lambda_vgg
 
-                    vgg_r = self.vgg_forward(self.vgg, image_r)
-                    vgg_r = Variable(vgg_r.data).detach()
-                    vgg_fake_B = self.vgg_forward(self.vgg, fake_B)
-                    g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
+
+                    #vgg_r = self.vgg_forward(self.vgg, image_r)
+                    #vgg_r = Variable(vgg_r.data).detach()
+                    #vgg_fake_B = self.vgg_forward(self.vgg, fake_B)
+                    #g_loss_B_vgg = self.criterionL2(vgg_fake_B, vgg_r) * self.lambda_B * self.lambda_vgg
+                    g_loss_B_vgg = self.compute_vgg_loss(self.vgg, fake_B, image_r) * self.lambda_A * self.lambda_vgg
 
                     loss_rec = (g_loss_rec_A + g_loss_rec_B + g_loss_A_vgg + g_loss_B_vgg) * 0.5
                     # loss_rec = (g_loss_rec_A + g_loss_A_vgg) * 0.5
