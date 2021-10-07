@@ -185,15 +185,22 @@ class Solver(Track):
             self.D_B.load_state_dict(torch.load(D_B_path))
             print('loaded trained discriminator B {}..!'.format(D_B_path))
 
+    '''
     def generate(self, org_A, ref_B, lms_A=None, lms_B=None, mask_A=None, mask_B=None,
                  diff_A=None, diff_B=None, gamma=None, beta=None, ret=False):
         """org_A is content, ref_B is style"""
         res = self.G(org_A, ref_B, mask_A, mask_B, diff_A, diff_B, gamma, beta, ret)
         return res
+    '''
+
+
+    def generate(self, org_A, ref_B):
+        res = self.G(org_A, ref_B)
+        return res
 
     # mask attribute: 0:background 1:face 2:left-eyebrown 3:right-eyebrown 4:left-eye 5: right-eye 6: nose
     # 7: upper-lip 8: teeth 9: under-lip 10:hair 11: left-ear 12: right-ear 13: neck
-
+    '''
     def test(self, real_A, mask_A, diff_A, real_B, mask_B, diff_B):
         cur_prama = None
         with torch.no_grad():
@@ -201,6 +208,26 @@ class Solver(Track):
                                       diff_A, diff_B, ret=True)
             fake_A = self.generate(real_A, real_B, None, None, mask_A, mask_B,
                                    diff_A, diff_B, gamma=cur_prama[0], beta=cur_prama[1])
+        fake_A = fake_A.squeeze(0)
+
+        # normalize
+        min_, max_ = fake_A.min(), fake_A.max()
+        fake_A.add_(-min_).div_(max_ - min_ + 1e-5)
+
+        return ToPILImage()(fake_A.cpu())
+    '''
+
+
+    def test(self, real_A, mask_A, diff_A, real_B, mask_B, diff_B):
+        cur_prama = None
+        with torch.no_grad():
+            """
+            cur_prama = self.generate(real_A, real_B, None, None, mask_A, mask_B, 
+                                  diff_A, diff_B, ret=True)
+            fake_A = self.generate(real_A, real_B, None, None, mask_A, mask_B, 
+                               diff_A, diff_B, gamma=cur_prama[0], beta=cur_prama[1])
+            """
+            fake_A = self.generate(real_A, real_B)
         fake_A = fake_A.squeeze(0)
 
         # normalize
@@ -344,7 +371,7 @@ class Solver(Track):
                     #rec_A = self.G(fake_A, image_s, mask_s, mask_s, dist_s, dist_s)
                     rec_A = self.G(fake_A, image_s)
                     #rec_B = self.G(fake_B, image_r, mask_r, mask_r, dist_r, dist_r)
-                    rec_N = self.G(fake_B, image_r)
+                    rec_B = self.G(fake_B, image_r)
 
                     g_loss_rec_A = self.criterionL1(rec_A, image_s) * self.lambda_A
                     g_loss_rec_B = self.criterionL1(rec_B, image_r) * self.lambda_B
