@@ -311,6 +311,7 @@ class Generator(nn.Module):
         self.MDNet = MDNet()
         self.AMM = AMM()
 
+    #input-------.only source image and reference image, no mask and position information
     def forward(self, source_image, reference_image):
         fm_source = self.encoder(source_image)
         fm_reference = self.MDNet(reference_image)

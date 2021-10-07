@@ -233,7 +233,8 @@ class Solver(Track):
                 d_loss_real = self.criterionGAN(out, True)
                 self.track("D_A_loss")
                 # Fake
-                fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
+                #fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
+                fake_A = self.G(image_s, image_r)
                 self.track("G")
                 fake_A = Variable(fake_A.data).detach()
                 out = self.D_A(fake_A)
@@ -257,7 +258,8 @@ class Solver(Track):
                 d_loss_real = self.criterionGAN(out, True)
                 # Fake
                 self.track("G-before")
-                fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
+                #fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
+                fake_B = self.G(image_r, image_s)
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
                 out = self.D_B(fake_B)
@@ -280,8 +282,10 @@ class Solver(Track):
                     assert self.lambda_idt > 0
 
                     # G should be identity if ref_B or org_A is fed
-                    idt_A = self.G(image_s, image_s, mask_s, mask_s, dist_s, dist_s)
-                    idt_B = self.G(image_r, image_r, mask_r, mask_r, dist_r, dist_r)
+                    #idt_A = self.G(image_s, image_s, mask_s, mask_s, dist_s, dist_s)
+                    idt_A = self.G(image_s, image_s)
+                    #idt_B = self.G(image_r, image_r, mask_r, mask_r, dist_r, dist_r)
+                    idt_B = self.G(image_r, image_r)
                     loss_idt_A = self.criterionL1(idt_A, image_s) * self.lambda_A * self.lambda_idt
                     loss_idt_B = self.criterionL1(idt_B, image_r) * self.lambda_B * self.lambda_idt
                     # loss_idt
@@ -291,12 +295,14 @@ class Solver(Track):
 
                     # GAN loss D_A(G_A(A))
                     # fake_A in class B,
-                    fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
+                    #fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
+                    fake_A = self.G(image_s, image_r)
                     pred_fake = self.D_A(fake_A)
                     g_A_loss_adv = self.criterionGAN(pred_fake, True)
 
                     # GAN loss D_B(G_B(B))
-                    fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
+                    #fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
+                    fake_B = self.G(image_r, image_s)
                     pred_fake = self.D_B(fake_B)
                     g_B_loss_adv = self.criterionGAN(pred_fake, True)
 
@@ -335,8 +341,10 @@ class Solver(Track):
                     # self.track("Generator histogram")
 
                     # cycle loss
-                    rec_A = self.G(fake_A, image_s, mask_s, mask_s, dist_s, dist_s)
-                    rec_B = self.G(fake_B, image_r, mask_r, mask_r, dist_r, dist_r)
+                    #rec_A = self.G(fake_A, image_s, mask_s, mask_s, dist_s, dist_s)
+                    rec_A = self.G(fake_A, image_s)
+                    #rec_B = self.G(fake_B, image_r, mask_r, mask_r, dist_r, dist_r)
+                    rec_N = self.G(fake_B, image_r)
 
                     g_loss_rec_A = self.criterionL1(rec_A, image_s) * self.lambda_A
                     g_loss_rec_B = self.criterionL1(rec_B, image_r) * self.lambda_B
