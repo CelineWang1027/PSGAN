@@ -75,10 +75,10 @@ class Generator(nn.Module):
         self.AMM = AMM()
 
     #input-------.only source image and reference image, no mask and position information
-    def forward(self, source_image, reference_image):
+    def forward(self, source_image, reference_image, mask_soruce, mask_ref, rel_pos_source, rel_pos_ref):
         fm_source = self.encoder(source_image)
         fm_reference = self.MDNet(reference_image)
-        morphed_fm = self.AMM(fm_source, fm_reference)
+        morphed_fm = self.AMM(fm_source, fm_reference, mask_soruce, mask_ref, rel_pos_source, rel_pos_ref)
         result = self.decoder(morphed_fm)
         return result
 
@@ -124,7 +124,73 @@ class AMM(nn.Module):
         HW = 64 * 64
         batch_size = 3
         #get 3 part feature using mask
-        
+        channels = fm_reference.shape[1]
+
+        mask_source_re = F.interpolate(mask_source, size=64).repeat(1, channels, 1, 1)  #(3, c, h, w)
+        fm_source = fm_source.repeat(3, 1, 1, 1)
+        #(3, c, h, w), 3 stands for 3 parts
+        fm_source = fm_source * mask_source_re
+
+        mask_ref_re = F.interpolate(mask_ref, size=64).repeat(1, channels, 1, 1)
+        fm_reference = fm_reference.repeat(3, 1, 1, 1)
+        fm_reference = fm_reference * mask_ref_re
+
+        theta_input = torch.cat((fm_source * 0.01, rel_pos_source), dim=1)
+        phi_input = torch.cat((fm_reference * 0.01, rel_pos_ref), dim=1)
+
+        theta_target = theta_input.view(batch_size, -1, HW)
+        theta_target = theta_target.permute(0, 2, 1)
+
+        phi_source = phi_input.view(batch_size, -1, HW)
+
+        weight = torch.bmm(theta_target, phi_source)
+        weight = weight.cpu()
+        weight_ind = torch.LongTensor(weight.detach().numpy().nonzero())
+        weight = weight.cuda()
+        weight_ind = weight_ind.cuda()
+        weight *= 200
+        weight = F.softmax(weight, dim=-1)
+        weight = weight[weight_ind[0], weight_ind[1], weight_ind[2]]
+
+        return torch.sparse.Float(weight_ind, weight, torch.Size([3, HW, HW]))
+
+    @staticmethod
+    def atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix):
+        batch_size, channels, width, height = old_gamma_matrix.size()
+
+        mask_ref_re = F.interpolate(mask_ref, size=old_gamma_matrix.shape[2:]).repeat(1, channels, 1, 1)
+        gamma_ref_re = old_gamma_matrix.repeat(3, 1, 1, 1)
+        old_gamma_matrix = gamma_ref_re * mask_ref_re
+        beta_ref_re = old_beta_matrix.repeat(3, 1, 1, 1)
+        old_beta_matrix = beta_ref_re * mask_ref_re
+
+        old_gamma_matrix = old_gamma_matrix.view(3, 1, -1)
+        old_beta_matrix = old_beta_matrix.view(3, 1, -1)
+
+        old_gamma_matrix = old_gamma_matrix.permute(0, 2, 1)
+        old_beta_matrix = old_beta_matrix.permute(0, 2, 1)
+        new_gamma_matrix = torch.bmm(attention_map.to_dense(), old_gamma_matrix)
+        new_beta_matrix = torch.bmm(attention_map.to_dense(), old_beta_matrix)
+        gamma = new_gamma_matrix.view(-1, 1, width, height)
+        beta = new_beta_matrix.view(-1, 1, width, height)
+
+        gamma = (gamma[0] + gamma[1] + gamma[2]).unsqueeze(0)
+        beta = (beta[0] + beta[1] + beta[2]).unsqueeze(0)
+        return gamma, beta
+
+    def forward(self, fm_source, fm_reference, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
+        old_gamma_matrix = self.lambda_matrix_conv(fm_reference)
+        old_beta_matrix = self.beta_matrix_conv(fm_reference)
+
+        attention_map = self.get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref)
+
+        gamma, beta = self.atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix)
+
+        morphed_fm_source = fm_source * (1 + gamma) + beta
+
+        return morphed_fm_source
+
+
 
     def forward(self, fm_source, fm_reference):
         batch_size, channels, width, height = fm_reference.size()
