@@ -119,6 +119,13 @@ class AMM(nn.Module):
         self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
         self.softmax = nn.Softmax(dim=-1)
 
+    @staticmethod
+    def get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref):
+        HW = 64 * 64
+        batch_size = 3
+        #get 3 part feature using mask
+        
+
     def forward(self, fm_source, fm_reference):
         batch_size, channels, width, height = fm_reference.size()
         '''
