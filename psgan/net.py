@@ -191,7 +191,7 @@ class AMM(nn.Module):
         return morphed_fm_source
 
 
-
+    """
     def forward(self, fm_source, fm_reference):
         batch_size, channels, width, height = fm_reference.size()
         '''
@@ -221,6 +221,7 @@ class AMM(nn.Module):
         morphed_fm_source = torch.add(morphed_fm_source, beta_tensor)
 
         return morphed_fm_source
+    """
 
 class Discriminator(nn.Module):
     """Discriminator. PatchGAN."""
