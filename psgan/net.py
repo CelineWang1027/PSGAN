@@ -17,8 +17,215 @@ from concern.track import Track
 # but it abstracts away the need to create the target label tensor
 # that has the same size as the input
 
+class AdaIN(nn.Module):
+    def __init__(self, style_num, num_features):
+        super().__init__()
+        self.norm = nn.InstanceNorm2d(num_features, affine=False)
+        self.fc = nn.Linear(style_num, num_features*2)
+
+    def forward(self, x, s):
+        h = self.fc(s)
+        h = h.view(h.size(0), h.size(1), 1, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
+        return (1 + gamma) * self.norm(x) + beta
+
+class ResBlk(nn.Module):
+    def __init__(self, dim_in, dim_out, actv=nn.LeakyReLU(0, 2), normalize=False, downsample=False):
+        super().__init__()
+        self.actv = actv
+        self.normalze = normalize
+        self.downsample = downsample
+        self.learned_sc = dim_in != dim_out
+        self._build_weights(dim_in, dim_out)
+
+    def _build_weights(self, dim_in, dim_out):
+        self.conv1 = nn.Conv2d(dim_in, dim_in, 3, 1, 1)
+        self.conv2 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
+        if self.normalze:
+            self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
+            self.norm2 = nn.InstanceNorm2d(dim_in, affine=True)
+        if self.learned_sc:
+            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
+
+    def _shortcut(self, x):
+        if self.learned_sc:
+            x = self.conv1x1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 2)
+        return x
+
+    def _residual(self, x):
+        if self.normalze:
+            x = self.norm1(x)
+        x = self.actv(x)
+        x = self.conv1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 2)
+        if self.normalze:
+            x = self.norm2(x)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+
+    def forward(self, x):
+        x = self._shortcut(x) + self._residual(x)
+        return x / math.sqrt(2)
+
+
+class AdainResBlk(nn.Module):
+    def __init__(self, dim_in, dim_out, style_dim=64, w_wpf=0, actv=nn.LeakyReLU(0,2), upsample=False):
+        super().__init__()
+        self.w_hpf = w_wpf
+        self.actv = actv
+        self.upsample = upsample
+        self.learned_sc = dim_in != dim_out
+        self._build_weights(dim_in, dim_out, style_dim)
+
+    def _build_weights(self, dim_in, dim_out, style_dim=64):
+        self.conv1 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
+        self.conv2 = nn.Conv2d(dim_out, dim_out, 3, 1, 1)
+        self.norm1 = AdaIN(style_dim, dim_in)
+        self.norm2 = AdaIN(style_dim, dim_out)
+        if self.learned_sc:
+            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
+
+    def _shortcut(self, x):
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+        if self.learned_sc:
+            x = self.conv1x1(x)
+        return x
+
+    def _residual(self, x, s):
+        x = self.norm1(x, s)
+        x = self.actv(x)
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+        x = self.conv1(x)
+        x = self.norm2(x, s)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+    def forward(self, x, s):
+        out = self._residual(x, s)
+        if self.w_hpf == 0:
+            out = (out + self._shortcut(x)) / math.sqrt(2)
+        return out
+
+
+class HighPass(nn.Module):
+    def __init__(self, w_hpf, device):
+        super(HighPass, self).__init__()
+        self.filter = torch.tensor([[-1, -1, -1],
+                                    [-1, 8., -1],
+                                   [-1, -1, -1]]).to(device) / w_hpf
+
+    def forward(self, x):
+        filter = self.filter.unsqueeze(0).unsqueeze(1).repeat(x.size(1), 1, 1, 1)
+        return F.conv2d(x, filter, padding=1, groups=x.size(1))
+
+
+class Generator(nn.Module):
+    def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
+        super().__init__()
+        dim_in = 2**14 // img_size
+        self.img_size = img_size
+        self.from_rgv = nn.Conv2d(3, dim_in, 3, 1, 1)
+        self.encode = nn.ModuleList()
+        self.decode = nn.ModuleList()
+        self.to_rgb = nn.Sequential(
+            nn.InstanceNorm2d(dim_in, affine=True),
+            nn.LeakyReLU(0,2),
+            nn.Conv2d(dim_in, 3, 1, 1, 1, 0)
+        )
+        #down/up-sampling blocks
+        repeat_num = int(np.log2(img_size)) - 4
+        if w_hpf > 0:
+            repeat_num += 1
+        for _ in range(repeat_num):
+            dim_out = min(dim_in*2, max_conv_dim)
+            self.encode.append(
+                ResBlk(dim_in, dim_out, normalize=True, downsample=True)
+            )
+            self.decode.insert(
+                0, AdainResBlk(dim_out, dim_in, style_dim, w_wpf=w_hpf, upsample=True)
+            )
+            dim_in = dim_out
+        #bottleneck blocks
+        for _ in range(2):
+            self.encode.append(
+                ResBlk(dim_out, dim_out, normalize=True)
+            )
+            self.decode.insert(
+                0, AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf)
+            )
+        if w_hpf > 0:
+            device = torch.device(
+                'cuda' if torch.cuda.is_available() else 'cpu'
+            )
+
+class MDNet(nn.Module):
+    def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
+        super(MDNet, self).__init__()
+        dim_in = 2**14 // img_size
+        layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
+                  nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
+        #down-samp@pling
+        repeat_num = int(np.log2(img_size)) - 4
+        if w_hpf > 0:
+            repeat_num += 1
+        for _ in range(repeat_num):
+            dim_out = min(dim_in*2, max_conv_dim)
+            layers.append(
+                ResBlk(dim_in, dim_out, normalize=True, downsample=True)
+            )
+            dim_in = dim_out
+        #bottleneck
+        for _ in range(2):
+            layers.append(
+                ResBlk(dim_out, dim_out, normalize=True)
+            )
+        if w_hpf > 0:
+            device = torch.device(
+                'cuda' if torch.cuda.is_available() else 'cpu'
+            )
+        self.hpf = HighPass(w_hpf, device)
+        self.main = nn.Sequential(*layers)
+
+    def forward(self, reference_image):
+        fm_reference = self.main(reference_image)
+        return fm_reference
+
+
+class AMM(nn.Module):
+    def __init__(self):
+        super(AMM, self).__init__()
+        self.visual_feature_weight = 0.01
+        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.softmax = nn.Softmax(dim=-1)
+
+    @staticmethod
+    def get_attentionmap(mask_source, mask_ref, fm_source, fm_reference, res_pol_source, res_pos_ref):
+        HW = 64 *64
+        batch_size = 3
+
+        channels = fm_reference.shape[1]
+
+        mask_source_re = F.interpolate(mask_source, size=64).repeat(1, channels, 1, 1)
+        fm_source = fm_source.repeat(3, 1, 1, 1)
+        fm_source = fm_source * mask_source_re
+
+        mask_ref_re = F.interpolate(mask_ref, size=64).repeat(1, channels, 1, 1)
+        fm_reference = fm_reference.repeat(3, 1, 1, 1)
+        fm_reference = fm_reference * mask_ref_re
+
+        theta_inout = torch.cat((fm_source))
+
+
+"""
 class ResidualBlock(nn.Module):
-    """Residual Block."""
+    #Residual Block.
     def __init__(self, dim_in, dim_out, net_mode=None):
         if net_mode == 'p' or (net_mode is None):
             use_affine = True
@@ -56,9 +263,9 @@ class NONLocalBlock2D(nn.Module):
                            kernel_size=1, stride=1, padding=0)
 
     def forward(self, source, weight):
-        """(b, c, h, w)
+        '''(b, c, h, w)
         src_diff: (3, 136, 32, 32)
-        """
+        '''
         batch_size = source.size(0)
 
         g_source = source.view(batch_size, 1, -1)  # (N, C, H*W)
@@ -71,7 +278,7 @@ class NONLocalBlock2D(nn.Module):
 
 
 class Generator(nn.Module, Track):
-    """Generator. Encoder-Decoder Architecture."""
+    #Generator. Encoder-Decoder Architecture.
     def __init__(self):
         super(Generator, self).__init__()
 
@@ -138,12 +345,12 @@ class Generator(nn.Module, Track):
 
     @staticmethod
     def atten_feature(mask_s, weight, gamma_s, beta_s, atten_module_g, atten_module_b):
-        """
+        '''
         feature size: (1, c, h, w)
         mask_c(s): (3, 1, h, w)
         diff_c: (1, 138, 256, 256)
         return: (1, c, h, w)
-        """
+        '''
         channel_num = gamma_s.shape[1]
 
         mask_s_re = F.interpolate(mask_s, size=gamma_s.shape[2:]).repeat(1, channel_num, 1, 1)
@@ -160,10 +367,10 @@ class Generator(nn.Module, Track):
         return gamma, beta
 
     def get_weight(self, mask_c, mask_s, fea_c, fea_s, diff_c, diff_s):
-        """  s --> source; c --> target
+        '''  s --> source; c --> target
         feature size: (1, 256, 64, 64)
         diff: (3, 136, 32, 32)
-        """
+        '''
         HW = 64 * 64
         batch_size = 3
         assert fea_s is not None   # fea_s when i==3
@@ -205,11 +412,11 @@ class Generator(nn.Module, Track):
 
     def forward(self, c, s, mask_c, mask_s, diff_c, diff_s, gamma=None, beta=None, ret=False):
         c, s, mask_c, mask_s, diff_c, diff_s = [x.squeeze(0) if x.ndim == 5 else x for x in [c, s, mask_c, mask_s, diff_c, diff_s]]
-        """attention version
+        '''attention version
         c: content, stands for source image. shape: (b, c, h, w)
         s: style, stands for reference image. shape: (b, c, h, w)
         mask_list_c: lip, skin, eye. (b, 1, h, w)
-        """
+        '''
 
         self.track("start")
         # forward c in tnet(MANet)
@@ -271,7 +478,7 @@ class Generator(nn.Module, Track):
 
 
 class Discriminator(nn.Module):
-    """Discriminator. PatchGAN."""
+    #Discriminator. PatchGAN.
     def __init__(self, image_size=128, conv_dim=64, repeat_num=3, norm='SN'):
         super(Discriminator, self).__init__()
 
@@ -318,7 +525,7 @@ class Discriminator(nn.Module):
         out_makeup = self.conv1(h)
         #return out_real.squeeze(), out_makeup.squeeze()
         return out_makeup
-
+"""
 class VGG(nn.Module):
     def __init__(self, pool='max'):
         super(VGG, self).__init__()
