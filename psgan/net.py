@@ -35,7 +35,7 @@ class ResidualBlock(nn.Module):
 #also called MANet
 class Generator(nn.Module):
     #Encoder-Decoder architecture
-    def __init__(self, conv_dim=64, repeat_num=6):
+    def __init__(self, conv_dim=64):
         super(Generator, self).__init__()
 
         encoder_layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
@@ -51,11 +51,11 @@ class Generator(nn.Module):
 
         #Bottleneck
         for i in range(3):
-            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
+            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
 
         decoder_layers = []
         for i in range(3):
-            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
+            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
 
         #Up-Sampling
         for i in range(2):
@@ -87,12 +87,10 @@ class MDNet(nn.Module):
     '''
     Encoder-bottleneck
     '''
-    def __init__(self, conv_dim=64, repeat_num=3):
+    def __init__(self, conv_dim=64):
         super(MDNet, self).__init__()
-
         layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
                   nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
-
 
         curr_dim = conv_dim
         #Down-sampling
@@ -103,8 +101,8 @@ class MDNet(nn.Module):
             curr_dim = curr_dim * 2
 
         #Bottleneck
-        for i in range(repeat_num):
-            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
+        for i in range(3):
+            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
         self.main = nn.Sequential(*layers)
 
     def forward(self, reference_image):
