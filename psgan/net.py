@@ -51,16 +51,16 @@ class Generator(nn.Module):
 
         #Bottleneck
         for i in range(3):
-            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
 
         decoder_layers = []
         for i in range(3):
-            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
 
         #Up-Sampling
         for i in range(2):
             decoder_layers.append(nn.ConvTranspose2d(curr_dim, curr_dim // 2, kernel_size=4, stride=2, padding=1, bias=False))
-            decoder_layers.append(nn.InstanceNorm2d(curr_dim // 2, affine=True))
+            decoder_layers.append(nn.InstanceNorm2d(curr_dim // 2, affine=False))
             decoder_layers.append(nn.ReLU(inplace=True))
             curr_dim = curr_dim // 2
 
@@ -102,7 +102,7 @@ class MDNet(nn.Module):
 
         #Bottleneck
         for i in range(3):
-            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
         self.main = nn.Sequential(*layers)
 
     def forward(self, reference_image):
