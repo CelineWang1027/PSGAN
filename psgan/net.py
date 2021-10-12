@@ -113,8 +113,8 @@ class AMM(nn.Module):
     def __init__(self):
         super(AMM, self).__init__()
         self.visual_feature_weight = 0.01
-        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
-        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0, bias=False)
+        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0, bias=False)
         self.softmax = nn.Softmax(dim=-1)
 
     @staticmethod
