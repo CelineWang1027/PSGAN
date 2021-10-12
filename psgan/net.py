@@ -130,18 +130,35 @@ class Generator(nn.Module):
         super().__init__()
         dim_in = 2**14 // img_size
         self.img_size = img_size
-        self.from_rgv = nn.Conv2d(3, dim_in, 3, 1, 1)
-        self.encode = nn.ModuleList()
-        self.decode = nn.ModuleList()
+        #self.from_rgb = nn.Conv2d(3, dim_in, 3, 1, 1)
+        #self.encode = nn.ModuleList()
+        #self.decode = nn.ModuleList()
+        '''
         self.to_rgb = nn.Sequential(
             nn.InstanceNorm2d(dim_in, affine=True),
             nn.LeakyReLU(0,2),
             nn.Conv2d(dim_in, 3, 1, 1, 1, 0)
         )
+        '''
+        encoder_layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
+                  nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
+        decoder_layers = []
         #down/up-sampling blocks
         repeat_num = int(np.log2(img_size)) - 4
         if w_hpf > 0:
             repeat_num += 1
+
+        #Down-sampling
+        for i in range(repeat_num):
+            dim_out = min(dim_in * 2, max_conv_dim)
+            '''
+            self.decode.insert(
+                0, AdainResBlk(dim_out, dim_in, style_dim, w_wpf=w_hpf, upsample=True))
+            '''
+            encoder_layers.append(ResBlk(dim_in, dim_out, normalize=True, downsample=True))
+            decoder_layers.append(AdainResBlk(dim_out, dim_in, style_dim, w_wpf=w_hpf, upsample=True))
+            dim_in = dim_out
+        '''
         for _ in range(repeat_num):
             dim_out = min(dim_in*2, max_conv_dim)
             self.encode.append(
@@ -151,19 +168,39 @@ class Generator(nn.Module):
                 0, AdainResBlk(dim_out, dim_in, style_dim, w_wpf=w_hpf, upsample=True)
             )
             dim_in = dim_out
-        #bottleneck blocks
+        '''
+        #bottleneck
+        for i in range(2):
+            encoder_layers.append(ResBlk(dim_out, dim_out, normalize=True))
+            decoder_layers.append( AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf))
+        '''
         for _ in range(2):
-            self.encode.append(
-                ResBlk(dim_out, dim_out, normalize=True)
-            )
             self.decode.insert(
                 0, AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf)
             )
+
+        '''
         if w_hpf > 0:
             device = torch.device(
                 'cuda' if torch.cuda.is_available() else 'cpu'
             )
+            self.hpf = HighPass(w_hpf, device)
+        decoder_layers.append(nn.Conv2d(dim_in, 3, kernel_size=7, stride=1, padding=3, bias=False))
+        decoder_layers.append(nn.Tanh())
 
+        self.encoder = nn.Sequential(*encoder_layers)
+        self.decoder = nn.Sequential(*decoder_layers)
+        self.MDNet = MDNet()
+        self.AMM = AMM()
+
+    def forward(self, source_image, reference_image, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
+        fm_source = self.encoder(source_image)
+        fm_referemce = self.MDNet(reference_image)
+        morphed_fm = self.AMM(fm_source, fm_referemce, mask_source, mask_ref, rel_pos_source, rel_pos_ref)
+        result = self.decoder(morphed_fm)
+        return result
+
+#distill feature map of reference image
 class MDNet(nn.Module):
     def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
         super(MDNet, self).__init__()
@@ -206,7 +243,7 @@ class AMM(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
     @staticmethod
-    def get_attentionmap(mask_source, mask_ref, fm_source, fm_reference, res_pol_source, res_pos_ref):
+    def get_attention_map(mask_source, mask_ref, fm_source, fm_reference, res_pos_source, res_pos_ref):
         HW = 64 *64
         batch_size = 3
 
@@ -220,7 +257,60 @@ class AMM(nn.Module):
         fm_reference = fm_reference.repeat(3, 1, 1, 1)
         fm_reference = fm_reference * mask_ref_re
 
-        theta_inout = torch.cat((fm_source))
+        theta_input = torch.cat((fm_source * 0.01, res_pos_source), dim=1)
+        phi_input = torch.cat((fm_reference * 0.01, res_pos_ref), dim=1)
+
+        theta_target = theta_input.view(batch_size, -1, HW)
+        theta_target = theta_target.permute(0, 2, 1)
+
+        phi_source = phi_input.view(batch_size, -1, HW)
+
+        weight = torch.bmm(theta_target, phi_source)
+        weight = weight.cpu()
+        weight_ind = torch.LongTensor(weight.detach().numpy().nonzero())
+        weight = weight.cuda()
+        weight_ind = weight_ind.cuda()
+        weight *= 200
+        weight = F.softmax(weight, dim=-1)
+        weight = weight[weight_ind[0], weight_ind[1], weight_ind[2]]
+
+        return torch.sparse.FloatTensor(weight_ind, weight, torch.Size([3, HW, HW]))
+
+    @staticmethod
+    def atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix):
+        batch_size, channels, width, height = old_gamma_matrix.size()
+
+        mask_ref_re = F.interpolate(mask_ref, size=old_gamma_matrix.shape[2:]).repeat(1, channels, 1, 1)
+        gamma_ref_re = old_gamma_matrix.repeat(3, 1, 1, 1)
+        old_gamma_matrix = gamma_ref_re * mask_ref_re
+        beta_ref_re = old_beta_matrix.repeat(3, 1, 1, 1)
+        old_beta_matrix = beta_ref_re * mask_ref_re
+
+        old_gamma_matrix = old_gamma_matrix.view(3, 1, -1)
+        old_beta_matrix = old_beta_matrix.view(3, 1, -1)
+
+        old_gamma_matrix = old_gamma_matrix.permute(0, 2, 1)
+        old_beta_matrix = old_beta_matrix.permute(0, 2, 1)
+        new_gamma_matrix = torch.bmm(attention_map.to_dense(), old_gamma_matrix)
+        new_beta_matrix = torch.bmm(attention_map.to_dense(), old_beta_matrix)
+        gamma = new_gamma_matrix.view(-1, 1, width, height)
+        beta = new_beta_matrix.view(-1, 1, width, height)
+
+        gamma = (gamma[0] + gamma[1] + gamma[2]).unsqueeze(0)
+        beta = (beta[0] + beta[1] + beta[2]).unsqueeze(0)
+        return gamma, beta
+
+    def forward(self, fm_source, fm_reference, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
+        old_gamma_matrix = self.lambda_matrix_conv(fm_reference)
+        old_beta_matrix = self.beta_matrix_conv(fm_reference)
+
+        attention_map = self.get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref)
+
+        gamma, beta = self.atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix)
+
+        morphed_fm_source = fm_source * (1 + gamma) + beta
+
+        return morphed_fm_source
 
 
 """
