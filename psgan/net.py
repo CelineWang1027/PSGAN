@@ -38,10 +38,8 @@ class Generator(nn.Module):
     def __init__(self, conv_dim=64, repeat_num=6):
         super(Generator, self).__init__()
 
-        encoder_layers = []
-        encoder_layers.append(nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False))
-        encoder_layers.append(nn.InstanceNorm2d(conv_dim, affine=False))
-        encoder_layers.append(nn.ReLU(inplace=True))
+        encoder_layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
+                          nn.InstanceNorm2d(conv_dim, affine=False), nn.ReLU(inplace=True)]
 
         #Down-sampling
         curr_dim = conv_dim
@@ -53,11 +51,11 @@ class Generator(nn.Module):
 
         #Bottleneck
         for i in range(3):
-            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            encoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
 
         decoder_layers = []
         for i in range(3):
-            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            decoder_layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
 
         #Up-Sampling
         for i in range(2):
@@ -75,10 +73,13 @@ class Generator(nn.Module):
         self.AMM = AMM()
 
     #input-------.only source image and reference image, no mask and position information
-    def forward(self, source_image, reference_image, mask_soruce, mask_ref, rel_pos_source, rel_pos_ref):
+    def forward(self, source_image, reference_image, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
+        source_image, reference_image, mask_source, mask_ref, rel_pos_source, rel_pos_ref = [
+            x.squeeze(0) if x.ndim == 5 else x for x in
+            [source_image, reference_image, mask_source, mask_ref, rel_pos_source, rel_pos_ref]]
         fm_source = self.encoder(source_image)
         fm_reference = self.MDNet(reference_image)
-        morphed_fm = self.AMM(fm_source, fm_reference, mask_soruce, mask_ref, rel_pos_source, rel_pos_ref)
+        morphed_fm = self.AMM(fm_source, fm_reference, mask_source, mask_ref, rel_pos_source, rel_pos_ref)
         result = self.decoder(morphed_fm)
         return result
 
@@ -89,10 +90,9 @@ class MDNet(nn.Module):
     def __init__(self, conv_dim=64, repeat_num=3):
         super(MDNet, self).__init__()
 
-        layers = []
-        layers.append(nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False))
-        layers.append(nn.InstanceNorm2d(conv_dim, affine=True))
-        layers.append(nn.ReLU(inplace=True))
+        layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
+                  nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
+
 
         curr_dim = conv_dim
         #Down-sampling
@@ -104,7 +104,7 @@ class MDNet(nn.Module):
 
         #Bottleneck
         for i in range(repeat_num):
-            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim))
+            layers.append(ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
         self.main = nn.Sequential(*layers)
 
     def forward(self, reference_image):
@@ -152,7 +152,7 @@ class AMM(nn.Module):
         weight = F.softmax(weight, dim=-1)
         weight = weight[weight_ind[0], weight_ind[1], weight_ind[2]]
 
-        return torch.sparse.Float(weight_ind, weight, torch.Size([3, HW, HW]))
+        return torch.sparse.FloatTensor(weight_ind, weight, torch.Size([3, HW, HW]))
 
     @staticmethod
     def atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix):
@@ -179,6 +179,7 @@ class AMM(nn.Module):
         return gamma, beta
 
     def forward(self, fm_source, fm_reference, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
+
         old_gamma_matrix = self.lambda_matrix_conv(fm_reference)
         old_beta_matrix = self.beta_matrix_conv(fm_reference)
 
