@@ -116,6 +116,8 @@ class AMM(nn.Module):
         self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0, bias=False)
         self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0, bias=False)
         self.softmax = nn.Softmax(dim=-1)
+        self.atten_bottleneck_g = NONLocalBlock2D()
+        self.atten_bottleneck_b = NONLocalBlock2D()
 
     @staticmethod
     def get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref):
@@ -142,10 +144,12 @@ class AMM(nn.Module):
         phi_source = phi_input.view(batch_size, -1, HW)
 
         weight = torch.bmm(theta_target, phi_source)
-        weight = weight.cpu()
-        weight_ind = torch.LongTensor(weight.detach().numpy().nonzero())
-        weight = weight.cuda()
-        weight_ind = weight_ind.cuda()
+        with torch.no_grad():
+            v = weight.detach().nonzero().long().permute(1, 0)
+            # This clone is required to correctly release cuda memory.
+            weight_ind = v.clone()
+            del v
+            torch.cuda.empty_cache()
         weight *= 200
         weight = F.softmax(weight, dim=-1)
         weight = weight[weight_ind[0], weight_ind[1], weight_ind[2]]
@@ -153,15 +157,15 @@ class AMM(nn.Module):
         return torch.sparse.FloatTensor(weight_ind, weight, torch.Size([3, HW, HW]))
 
     @staticmethod
-    def atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix):
-        batch_size, channels, width, height = old_gamma_matrix.size()
-
+    def atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix, atten_module_g, atten_module_b):
+        #batch_size, channels, width, height = old_gamma_matrix.size()
+        channels = old_gamma_matrix.shape[1]
         mask_ref_re = F.interpolate(mask_ref, size=old_gamma_matrix.shape[2:]).repeat(1, channels, 1, 1)
         gamma_ref_re = old_gamma_matrix.repeat(3, 1, 1, 1)
         old_gamma_matrix = gamma_ref_re * mask_ref_re
         beta_ref_re = old_beta_matrix.repeat(3, 1, 1, 1)
         old_beta_matrix = beta_ref_re * mask_ref_re
-
+        '''
         old_gamma_matrix = old_gamma_matrix.view(3, 1, -1)
         old_beta_matrix = old_beta_matrix.view(3, 1, -1)
 
@@ -171,6 +175,9 @@ class AMM(nn.Module):
         new_beta_matrix = torch.bmm(attention_map.to_dense(), old_beta_matrix)
         gamma = new_gamma_matrix.view(-1, 1, width, height)
         beta = new_beta_matrix.view(-1, 1, width, height)
+        '''
+        gamma = atten_module_g(old_gamma_matrix, attention_map)
+        beta = atten_module_b(old_beta_matrix, attention_map)
 
         gamma = (gamma[0] + gamma[1] + gamma[2]).unsqueeze(0)
         beta = (beta[0] + beta[1] + beta[2]).unsqueeze(0)
@@ -183,7 +190,7 @@ class AMM(nn.Module):
 
         attention_map = self.get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref)
 
-        gamma, beta = self.atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix)
+        gamma, beta = self.atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix, self.atten_bottleneck_g, self.atten_bottleneck_b)
 
         morphed_fm_source = fm_source * (1 + gamma) + beta
 
@@ -221,6 +228,26 @@ class AMM(nn.Module):
 
         return morphed_fm_source
     """
+
+class NONLocalBlock2D(nn.Module):
+    def __init__(self):
+        super(NONLocalBlock2D, self).__init__()
+        self.g = nn.Conv2d(in_channels=1, out_channels=1,
+                           kernel_size=1, stride=1, padding=0)
+
+    def forward(self, source, weight):
+        """(b, c, h, w)
+        src_diff: (3, 136, 32, 32)
+        """
+        batch_size = source.size(0)
+
+        g_source = source.view(batch_size, 1, -1)  # (N, C, H*W)
+        g_source = g_source.permute(0, 2, 1)  # (N, H*W, C)
+
+        y = torch.bmm(weight.to_dense(), g_source)
+        y = y.permute(0, 2, 1).contiguous()  # (N, C, H*W)
+        y = y.view(batch_size, 1, *source.size()[2:])
+        return y
 
 class Discriminator(nn.Module):
     """Discriminator. PatchGAN."""
