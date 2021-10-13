@@ -140,8 +140,8 @@ class Generator(nn.Module):
             nn.Conv2d(dim_in, 3, 1, 1, 1, 0)
         )
         '''
-        encoder_layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
-                  nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
+        encoder_layers = [nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False),
+                  nn.InstanceNorm2d(conv_dim, affine=False), nn.ReLU(inplace=True)]
         decoder_layers = []
         #down/up-sampling blocks
         repeat_num = int(np.log2(img_size)) - 4
@@ -172,7 +172,7 @@ class Generator(nn.Module):
         #bottleneck
         for i in range(2):
             encoder_layers.append(ResBlk(dim_out, dim_out, normalize=True))
-            decoder_layers.append( AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf))
+            decoder_layers.append(AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf))
         '''
         for _ in range(2):
             self.decode.insert(
@@ -205,7 +205,7 @@ class MDNet(nn.Module):
     def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
         super(MDNet, self).__init__()
         dim_in = 2**14 // img_size
-        layers = [nn.Conv2d(3, conv_dim, kernel_size=7, stride=1, padding=3, bias=False),
+        layers = [nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False),
                   nn.InstanceNorm2d(conv_dim, affine=True), nn.ReLU(inplace=True)]
         #down-samp@pling
         repeat_num = int(np.log2(img_size)) - 4
@@ -238,9 +238,13 @@ class AMM(nn.Module):
     def __init__(self):
         super(AMM, self).__init__()
         self.visual_feature_weight = 0.01
-        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
-        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1)
+        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
+                                            bias=False)
+        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
+                                          bias=False)
         self.softmax = nn.Softmax(dim=-1)
+        self.atten_bottleneck_g = NONLocalBlock2D()
+        self.atten_bottleneck_b = NONLocalBlock2D()
 
     @staticmethod
     def get_attention_map(mask_source, mask_ref, fm_source, fm_reference, res_pos_source, res_pos_ref):
@@ -266,10 +270,12 @@ class AMM(nn.Module):
         phi_source = phi_input.view(batch_size, -1, HW)
 
         weight = torch.bmm(theta_target, phi_source)
-        weight = weight.cpu()
-        weight_ind = torch.LongTensor(weight.detach().numpy().nonzero())
-        weight = weight.cuda()
-        weight_ind = weight_ind.cuda()
+        with torch.no_grad():
+            v = weight.detach().nonzero().long().permute(1, 0)
+            # This clone is required to correctly release cuda memory.
+            weight_ind = v.clone()
+            del v
+            torch.cuda.empty_cache()
         weight *= 200
         weight = F.softmax(weight, dim=-1)
         weight = weight[weight_ind[0], weight_ind[1], weight_ind[2]]
@@ -285,7 +291,7 @@ class AMM(nn.Module):
         old_gamma_matrix = gamma_ref_re * mask_ref_re
         beta_ref_re = old_beta_matrix.repeat(3, 1, 1, 1)
         old_beta_matrix = beta_ref_re * mask_ref_re
-
+        '''
         old_gamma_matrix = old_gamma_matrix.view(3, 1, -1)
         old_beta_matrix = old_beta_matrix.view(3, 1, -1)
 
@@ -295,6 +301,9 @@ class AMM(nn.Module):
         new_beta_matrix = torch.bmm(attention_map.to_dense(), old_beta_matrix)
         gamma = new_gamma_matrix.view(-1, 1, width, height)
         beta = new_beta_matrix.view(-1, 1, width, height)
+        '''
+        gamma = atten_module_g(old_gamma_matrix, attention_map)
+        beta = atten_module_b(old_beta_matrix, attention_map)
 
         gamma = (gamma[0] + gamma[1] + gamma[2]).unsqueeze(0)
         beta = (beta[0] + beta[1] + beta[2]).unsqueeze(0)
@@ -311,6 +320,26 @@ class AMM(nn.Module):
         morphed_fm_source = fm_source * (1 + gamma) + beta
 
         return morphed_fm_source
+
+class NONLocalBlock2D(nn.Module):
+    def __init__(self):
+        super(NONLocalBlock2D, self).__init__()
+        self.g = nn.Conv2d(in_channels=1, out_channels=1,
+                           kernel_size=1, stride=1, padding=0)
+
+    def forward(self, source, weight):
+        """(b, c, h, w)
+        src_diff: (3, 136, 32, 32)
+        """
+        batch_size = source.size(0)
+
+        g_source = source.view(batch_size, 1, -1)  # (N, C, H*W)
+        g_source = g_source.permute(0, 2, 1)  # (N, H*W, C)
+
+        y = torch.bmm(weight.to_dense(), g_source)
+        y = y.permute(0, 2, 1).contiguous()  # (N, C, H*W)
+        y = y.view(batch_size, 1, *source.size()[2:])
+        return y
 
 
 """
