@@ -173,16 +173,19 @@ class Solver(Track):
     def load_checkpoint(self):
         G_path = os.path.join(self.checkpoint, 'G.pth')
         if os.path.exists(G_path):
-            self.G.load_state_dict(torch.load(G_path))
+            #self.G.load_state_dict(torch.load(G_path))
+            self.G.load_state_dict({k.replace('module.', ''): v for k, v in torch.load(G_path).items()})
             print('loaded trained generator {}..!'.format(G_path))
         D_A_path = os.path.join(self.checkpoint, 'D_A.pth')
         if os.path.exists(D_A_path):
-            self.D_A.load_state_dict(torch.load(D_A_path))
+            #self.D_A.load_state_dict(torch.load(D_A_path))
+            self.D_A.load_state_dict({k.replace('module.', ''): v for k, v in torch.load(D_A_path).items()})
             print('loaded trained discriminator A {}..!'.format(D_A_path))
 
         D_B_path = os.path.join(self.checkpoint, 'D_B.pth')
         if os.path.exists(D_B_path):
-            self.D_B.load_state_dict(torch.load(D_B_path))
+            #self.D_B.load_state_dict(torch.load(D_B_path))
+            self.D_B.load_state_dict({k.replace('module.', ''): v for k, v in torch.load(D_B_path).items()})
             print('loaded trained discriminator B {}..!'.format(D_B_path))
 
     def generate(self, org_A, ref_B, lms_A=None, lms_B=None, mask_A=None, mask_B=None,
