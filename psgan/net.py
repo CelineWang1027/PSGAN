@@ -33,7 +33,7 @@ class ResBlk(nn.Module):
     def __init__(self, dim_in, dim_out, actv=nn.LeakyReLU(0.2), normalize=False, downsample=False):
         super().__init__()
         self.actv = actv
-        self.normalze = normalize
+        self.normalize = normalize
         self.downsample = downsample
         self.learned_sc = dim_in != dim_out
         self._build_weights(dim_in, dim_out)
@@ -41,7 +41,7 @@ class ResBlk(nn.Module):
     def _build_weights(self, dim_in, dim_out):
         self.conv1 = nn.Conv2d(dim_in, dim_in, 3, 1, 1)
         self.conv2 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
-        if self.normalze:
+        if self.normalize:
             self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
             self.norm2 = nn.InstanceNorm2d(dim_in, affine=True)
         if self.learned_sc:
@@ -55,13 +55,13 @@ class ResBlk(nn.Module):
         return x
 
     def _residual(self, x):
-        if self.normalze:
+        if self.normalize:
             x = self.norm1(x)
         x = self.actv(x)
         x = self.conv1(x)
         if self.downsample:
             x = F.avg_pool2d(x, 2)
-        if self.normalze:
+        if self.normalize:
             x = self.norm2(x)
         x = self.actv(x)
         x = self.conv2(x)
@@ -88,8 +88,8 @@ class AdainResBlk(nn.Module):
         self.norm1 = AdaIN(style_dim, dim_in)
         self.norm2 = AdaIN(style_dim, dim_out)
         '''
-        self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
-        self.norm2 = nn.InstanceNorm2d(dim_out, affine=True)
+        self.norm1 = nn.InstanceNorm2d(dim_in, affine=False)
+        self.norm2 = nn.InstanceNorm2d(dim_out, affine=False)
         if self.learned_sc:
             self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
 
