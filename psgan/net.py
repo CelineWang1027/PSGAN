@@ -160,8 +160,11 @@ class Generator(nn.Module):
             nn.Conv2d(dim_in, 3, 1, 1, 1, 0)
         )
         '''
+        '''
         encoder_layers = [nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False),
                   nn.InstanceNorm2d(64, affine=False), nn.ReLU(inplace=True)]
+        '''
+        encoder_layers = [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
         #down/up-sampling blocks
         #repeat_num = int(np.log2(img_size)) - 4
@@ -216,9 +219,13 @@ class Generator(nn.Module):
             dim_out = min(dim_in // 2, max_conv_dim)
             decoder_layers.append(AdainResBlk(dim_in, dim_out, style_dim, w_wpf=w_hpf, upsample=True))
             dim_in = dim_out
-
+        '''
         decoder_layers.append(nn.Conv2d(dim_in, 3, kernel_size=7, stride=1, padding=3, bias=False))
         decoder_layers.append(nn.Tanh())
+        '''
+        decoder_layers.append(nn.InstanceNorm2d(dim_in, affine=True))
+        decoder_layers.append(nn.LeakyReLU(0.2))
+        decoder_layers.append(nn.Conv2d(dim_in, 3, 1, 1, 0))
 
         self.encoder = nn.Sequential(*encoder_layers)
         self.decoder = nn.Sequential(*decoder_layers)
@@ -240,8 +247,11 @@ class MDNet(nn.Module):
     def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
         super(MDNet, self).__init__()
         dim_in = 2**14 // img_size
+        '''
         layers = [nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False),
                   nn.InstanceNorm2d(64, affine=True), nn.ReLU(inplace=True)]
+        '''
+        layers = [nn.Conv2d(3, dim_in, 3, 1, 1)]
         #down-sampling
         #repeat_num = int(np.log2(img_size)) - 4
         repeat_num = 2
