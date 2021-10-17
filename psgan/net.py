@@ -288,13 +288,14 @@ class AMM(nn.Module):
     def __init__(self):
         super(AMM, self).__init__()
         self.visual_feature_weight = 0.01
-        self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
-                                            bias=False)
-        self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
-                                          bias=False)
+        #self.lambda_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
+        #                                    bias=False)
+        #self.beta_matrix_conv = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0,
+        #                                  bias=False)
         self.softmax = nn.Softmax(dim=-1)
         self.atten_bottleneck_g = NONLocalBlock2D()
         self.atten_bottleneck_b = NONLocalBlock2D()
+        self.MakeupMatrix = GetMatrix(256, 1)
 
     @staticmethod
     def get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref):
@@ -361,9 +362,9 @@ class AMM(nn.Module):
         return gamma, beta
 
     def forward(self, fm_source, fm_reference, mask_source, mask_ref, rel_pos_source, rel_pos_ref):
-        old_gamma_matrix = self.lambda_matrix_conv(fm_reference)
-        old_beta_matrix = self.beta_matrix_conv(fm_reference)
-
+        #old_gamma_matrix = self.lambda_matrix_conv(fm_reference)
+        #old_beta_matrix = self.beta_matrix_conv(fm_reference)
+        fm_reference, old_gamma_matrix, old_beta_matrix = self.MakeupMatrix(fm_reference)
         attention_map = self.get_attention_map(mask_source, mask_ref, fm_source, fm_reference, rel_pos_source, rel_pos_ref)
 
         gamma, beta = self.atten_feature(mask_ref, attention_map, old_gamma_matrix, old_beta_matrix, self.atten_bottleneck_g, self.atten_bottleneck_b)
@@ -371,6 +372,17 @@ class AMM(nn.Module):
         morphed_fm_source = fm_source * (1 + gamma) + beta
 
         return morphed_fm_source
+
+class GetMatrix(nn.Module):
+    def __init__(self, dim_in, dim_out):
+        super(GetMatrix, self).__init__()
+        self.get_gamma = nn.Conv2d(dim_in, dim_out, kernel_size=1, stride=1, padding=0, bias=False)
+        self.get_beta = nn.Conv2d(dim_in, dim_out, kernel_size=1, stride=1, padding=0, bias=False)
+
+    def forward(self, x):
+        gamma = self.get_gamma(x)
+        beta = self.get_beta(x)
+        return x, gamma, beta
 
 class NONLocalBlock2D(nn.Module):
     def __init__(self):
