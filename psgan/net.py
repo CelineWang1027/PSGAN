@@ -175,7 +175,7 @@ class Generator(nn.Module):
         '''
         #Down-sampling
         for i in range(repeat_num):
-            dim_out = min(dim_in * 2, max_conv_dim)
+            dim_out = min(dim_in*2, max_conv_dim)
             '''
             self.decode.insert(
                 0, AdainResBlk(dim_out, dim_in, style_dim, w_wpf=w_hpf, upsample=True))
