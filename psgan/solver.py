@@ -99,6 +99,8 @@ class Solver(Track):
         # self.G = net.Generator()
         self.D_A = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
         self.D_B = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
+        #self.D_A = net.Discriminator()
+        #self.D_B = net.Discriminator()
 
         self.G.apply(self.weights_init_xavier)
         self.D_A.apply(self.weights_init_xavier)

@@ -658,7 +658,29 @@ class Generator(nn.Module, Track):
         c_tnet = self.tnet_out(c_tnet)
         return c_tnet
 """
+'''
+class Discriminator(nn.Module):
+    def __init__(self, img_size=256, num_domains=2, max_conv_dim=512):
+        super().__init__()
+        dim_in = 2**14 // img_size #64
+        blocks = []
+        blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
+        repeat_num = int(np.log2(img_size)) - 2  #6
+        for _ in range(repeat_num):
+            dim_out = min(dim_in*2, max_conv_dim)
+            blocks += [ResBlk(dim_in, dim_out, downsample=True)]
+            dim_in = dim_out
+        blocks += [nn.LeakyReLU(0.2)]
+        blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+        blocks += [nn.LeakyReLU(0.2)]
+        blocks += [nn.Conv2d(dim_out, num_domains, 1, 1, 0)]
+        self.main = nn.Sequential(*blocks)
 
+    def forward(self, x):
+        out = self.main(x)
+        out = out.view(out.size(0), -1)
+        return out
+'''
 class Discriminator(nn.Module):
     #Discriminator. PatchGAN.
     def __init__(self, image_size=128, conv_dim=64, repeat_num=3, norm='SN'):
