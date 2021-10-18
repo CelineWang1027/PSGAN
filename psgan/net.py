@@ -236,7 +236,7 @@ class Generator(nn.Module, Track):
         self.atten_bottleneck_b = NONLocalBlock2D()
         self.simple_spade = GetMatrix(curr_dim, 1)      # get the makeup matrix
 
-        for i in range(3):
+        for i in range(2):
             #setattr(self, f'pnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
             setattr(self, f'pnet_bottleneck_{i+1}', ResBlk(curr_dim, curr_dim, normalize=True))
 
@@ -256,24 +256,35 @@ class Generator(nn.Module, Track):
             setattr(self, f'tnet_down_spade_{i+1}', nn.InstanceNorm2d(curr_dim * 2, affine=False))
             setattr(self, f'tnet_down_relu_{i+1}', nn.ReLU(inplace=True))
             '''
-            setattr(self, f't_net_down_{i+1}', ResBlk(curr_dim, curr_dim * 2, normalize=True, downsample=True))
+            setattr(self, f'tnet_down_{i+1}', ResBlk(curr_dim, curr_dim * 2, normalize=True, downsample=True))
             curr_dim = curr_dim * 2
 
         # Bottleneck
-        for i in range(6):
+        for i in range(2):
             #setattr(self, f'tnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
-            setattr(self, f't_net_bottleneck_{i+1}', )
+            setattr(self, f'tnet_bottleneck1_{i+1}', ResBlk(curr_dim, curr_dim, normalize=True))
+        for i in range(2):
+            setattr(self, f'tnet_bottleneck2_{i+1}', AdainResBlk(curr_dim, curr_dim, 64, w_wpf=0))
 
         # Up-Sampling
         for i in range(2):
+            '''
             setattr(self, f'tnet_up_conv_{i+1}', nn.ConvTranspose2d(curr_dim, curr_dim // 2, kernel_size=4, stride=2, padding=1, bias=False))
             setattr(self, f'tnet_up_spade_{i+1}', nn.InstanceNorm2d(curr_dim // 2, affine=False))
             setattr(self, f'tnet_up_relu_{i+1}', nn.ReLU(inplace=True))
+            '''
+            setattr(self, f'tnet_up_{i+1}', AdainResBlk(curr_dim, curr_dim // 2, 64, w_wpf=0, upsample=True))
             curr_dim = curr_dim // 2
-
+        '''
         layers = nn.Sequential(
             nn.Conv2d(curr_dim, 3, kernel_size=7, stride=1, padding=3, bias=False),
             nn.Tanh()
+        )
+        '''
+        layers = nn.Sequential(
+            nn.InstanceNorm2d(curr_dim, affine=True),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(curr_dim, 3, 1, 1, 0)
         )
         self.tnet_out = layers
         Track.__init__(self)
@@ -355,30 +366,37 @@ class Generator(nn.Module, Track):
 
         self.track("start")
         # forward c in tnet(MANet)
-        c_tnet = self.tnet_in_conv(c)
+        #c_tnet = self.tnet_in_conv(c)
         s = self.pnet_in(s)
-        c_tnet = self.tnet_in_spade(c_tnet)
-        c_tnet = self.tnet_in_relu(c_tnet)
+        #c_tnet = self.tnet_in_spade(c_tnet)
+        #c_tnet = self.tnet_in_relu(c_tnet)
+        c_tnet = self.tnet_in(c)
 
         # down-sampling
         for i in range(2):
             if gamma is None:
                 cur_pnet_down = getattr(self, f'pnet_down_{i+1}')
                 s = cur_pnet_down(s)
-
+            '''
             cur_tnet_down_conv = getattr(self, f'tnet_down_conv_{i+1}')
             cur_tnet_down_spade = getattr(self, f'tnet_down_spade_{i+1}')
             cur_tnet_down_relu = getattr(self, f'tnet_down_relu_{i+1}')
             c_tnet = cur_tnet_down_conv(c_tnet)
             c_tnet = cur_tnet_down_spade(c_tnet)
             c_tnet = cur_tnet_down_relu(c_tnet)
+            '''
+            cur_tnet_down = getattr(self, f'tnet_down_{i+1}')
+            c_tnet = cur_tnet_down(c_tnet)
         self.track("downsampling")
 
         # bottleneck
-        for i in range(6):
-            if gamma is None and i <= 2:
+        for i in range(4):
+            if gamma is None and i <= 1:
                 cur_pnet_bottleneck = getattr(self, f'pnet_bottleneck_{i+1}')
-            cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck_{i+1}')
+                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck1_{i+1}')
+            if i > 1:
+                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck2_{i+1}')
+            #cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck_{i+1}')
 
             # get s_pnet from p and transform
             if i == 3:
@@ -395,17 +413,22 @@ class Generator(nn.Module, Track):
 
             if gamma is None and i <= 2:
                 s = cur_pnet_bottleneck(s)
+                #c_tnet = cur_tnet_bottleneck(c_tnet)
             c_tnet = cur_tnet_bottleneck(c_tnet)
         self.track("bottleneck")
 
         # up-sampling
         for i in range(2):
+            '''
             cur_tnet_up_conv = getattr(self, f'tnet_up_conv_{i+1}')
             cur_tnet_up_spade = getattr(self, f'tnet_up_spade_{i+1}')
             cur_tnet_up_relu = getattr(self, f'tnet_up_relu_{i+1}')
             c_tnet = cur_tnet_up_conv(c_tnet)
             c_tnet = cur_tnet_up_spade(c_tnet)
             c_tnet = cur_tnet_up_relu(c_tnet)
+            '''
+            cur_tnet_up = getattr(self, f'tnet_up_{i+1}')
+            c_tnet = cur_tnet_up(c_tnet)
         self.track("upsampling")
 
         c_tnet = self.tnet_out(c_tnet)
