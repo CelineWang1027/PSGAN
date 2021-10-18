@@ -17,6 +17,135 @@ from concern.track import Track
 # but it abstracts away the need to create the target label tensor
 # that has the same size as the input
 
+class AdaIN(nn.Module):
+    def __init__(self, style_num, num_features):
+        super().__init__()
+        self.norm = nn.InstanceNorm2d(num_features, affine=False)
+        self.fc = nn.Linear(style_num, num_features*2)
+
+    def forward(self, x, s):
+        h = self.fc(s)
+        h = h.view(h.size(0), h.size(1), 1, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
+        return (1 + gamma) * self.norm(x) + beta
+
+class ResBlk(nn.Module):
+    def __init__(self, dim_in, dim_out, actv=nn.LeakyReLU(0.2), normalize=False, downsample=False):
+        super().__init__()
+        self.actv = actv
+        self.normalize = normalize
+        self.downsample = downsample
+        self.learned_sc = dim_in != dim_out
+        self._build_weights(dim_in, dim_out)
+
+    def _build_weights(self, dim_in, dim_out):
+        self.conv1 = nn.Conv2d(dim_in, dim_in, 3, 1, 1)
+        self.conv2 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
+        if self.normalize:
+            self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
+            self.norm2 = nn.InstanceNorm2d(dim_in, affine=True)
+        if self.learned_sc:
+            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
+
+    def _shortcut(self, x):
+        if self.learned_sc:
+            x = self.conv1x1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 2)
+        return x
+
+    def _residual(self, x):
+        if self.normalize:
+            x = self.norm1(x)
+        x = self.actv(x)
+        x = self.conv1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 2)
+        if self.normalize:
+            x = self.norm2(x)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+
+    def forward(self, x):
+        x = self._shortcut(x) + self._residual(x)
+        return x / math.sqrt(2)
+
+
+class AdainResBlk(nn.Module):
+    def __init__(self, dim_in, dim_out, style_dim=64, w_wpf=0, actv=nn.LeakyReLU(0.2), upsample=False):
+        super().__init__()
+        self.w_hpf = w_wpf
+        self.actv = actv
+        self.upsample = upsample
+        self.learned_sc = dim_in != dim_out
+        self._build_weights(dim_in, dim_out, style_dim)
+
+    def _build_weights(self, dim_in, dim_out, style_dim=64):
+        self.conv1 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
+        self.conv2 = nn.Conv2d(dim_out, dim_out, 3, 1, 1)
+        '''
+        self.norm1 = AdaIN(style_dim, dim_in)
+        self.norm2 = AdaIN(style_dim, dim_out)
+        '''
+        self.norm1 = nn.InstanceNorm2d(dim_in, affine=False)
+        self.norm2 = nn.InstanceNorm2d(dim_out, affine=False)
+        if self.learned_sc:
+            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
+
+    def _shortcut(self, x):
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+        if self.learned_sc:
+            x = self.conv1x1(x)
+        return x
+    '''
+    def _residual(self, x, s):
+        x = self.norm1(x, s)
+        x = self.actv(x)
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+        x = self.conv1(x)
+        x = self.norm2(x, s)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+    def forward(self, x, s):
+        out = self._residual(x, s)
+        if self.w_hpf == 0:
+            out = (out + self._shortcut(x)) / math.sqrt(2)
+        return out
+    '''
+    def _residual(self, x):
+        x = self.norm1(x)
+        x = self.actv(x)
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+        x = self.conv1(x)
+        x = self.norm2(x)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+
+    def forward(self, x):
+        out = self._residual(x)
+        if self.w_hpf == 0:
+            out = (out + self._shortcut(x)) / math.sqrt(2)
+        return out
+
+class HighPass(nn.Module):
+    def __init__(self, w_hpf, device):
+        super(HighPass, self).__init__()
+        self.filter = torch.tensor([[-1, -1, -1],
+                                    [-1, 8., -1],
+                                   [-1, -1, -1]]).to(device) / w_hpf
+
+    def forward(self, x):
+        filter = self.filter.unsqueeze(0).unsqueeze(1).repeat(x.size(1), 1, 1, 1)
+        return F.conv2d(x, filter, padding=1, groups=x.size(1))
+
+
+
 class ResidualBlock(nn.Module):
     """Residual Block."""
     def __init__(self, dim_in, dim_out, net_mode=None):
@@ -76,24 +205,30 @@ class Generator(nn.Module, Track):
         super(Generator, self).__init__()
 
         # -------------------------- PNet(MDNet) for obtaining makeup matrices --------------------------
-
+        '''
         layers = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False),
             nn.InstanceNorm2d(64, affine=True),
             nn.ReLU(inplace=True)
+        )
+        '''
+        layers = nn.Sequential(
+            nn.Conv2d(3, 64, 3, 1, 1)
         )
         self.pnet_in = layers
 
         # Down-Sampling
         curr_dim = 64
         for i in range(2):
+            '''
             layers = nn.Sequential(
                 nn.Conv2d(curr_dim, curr_dim * 2, kernel_size=4, stride=2, padding=1, bias=False),
                 nn.InstanceNorm2d(curr_dim * 2, affine=True),
                 nn.ReLU(inplace=True),
             )
-
-            setattr(self, f'pnet_down_{i+1}', layers)
+            '''
+            #setattr(self, f'pnet_down_{i+1}', layers)
+            setattr(self, f'pnet_down_{i+1}', ResBlk(curr_dim, curr_dim * 2, normalize=True, downsample=True))
             curr_dim = curr_dim * 2
 
         # Bottleneck. All bottlenecks share the same attention module
@@ -102,25 +237,32 @@ class Generator(nn.Module, Track):
         self.simple_spade = GetMatrix(curr_dim, 1)      # get the makeup matrix
 
         for i in range(3):
-            setattr(self, f'pnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
+            #setattr(self, f'pnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
+            setattr(self, f'pnet_bottleneck_{i+1}', ResBlk(curr_dim, curr_dim, normalize=True))
 
         # --------------------------- TNet(MANet) for applying makeup transfer ----------------------------
-
+        '''
         self.tnet_in_conv = nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False)
         self.tnet_in_spade = nn.InstanceNorm2d(64, affine=False)
         self.tnet_in_relu = nn.ReLU(inplace=True)
+        '''
+        self.tnet_in = nn.Conv2d(3, 64, 3, 1, 1)
 
         # Down-Sampling
         curr_dim = 64
         for i in range(2):
+            '''
             setattr(self, f'tnet_down_conv_{i+1}', nn.Conv2d(curr_dim, curr_dim * 2, kernel_size=4, stride=2, padding=1, bias=False))
             setattr(self, f'tnet_down_spade_{i+1}', nn.InstanceNorm2d(curr_dim * 2, affine=False))
             setattr(self, f'tnet_down_relu_{i+1}', nn.ReLU(inplace=True))
+            '''
+            setattr(self, f't_net_down_{i+1}', ResBlk(curr_dim, curr_dim * 2, normalize=True, downsample=True))
             curr_dim = curr_dim * 2
 
         # Bottleneck
         for i in range(6):
-            setattr(self, f'tnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
+            #setattr(self, f'tnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
+            setattr(self, f't_net_bottleneck_{i+1}', )
 
         # Up-Sampling
         for i in range(2):
