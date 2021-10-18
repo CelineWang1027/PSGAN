@@ -196,7 +196,7 @@ class Generator(nn.Module):
         '''
         decoder_layers = []
         #bottleneck
-        for i in range(2):
+        for i in range(3):
             encoder_layers.append(ResBlk(dim_out, dim_out, normalize=True))
             decoder_layers.append(AdainResBlk(dim_out, dim_out, style_dim, w_wpf=w_hpf))
         '''
@@ -266,7 +266,7 @@ class MDNet(nn.Module):
             )
             dim_in = dim_out
         #bottleneck
-        for _ in range(2):
+        for _ in range(3):
             layers.append(
                 ResBlk(dim_out, dim_out, normalize=True)
             )
