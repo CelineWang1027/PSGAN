@@ -395,11 +395,11 @@ class Generator(nn.Module, Track):
                 cur_pnet_bottleneck = getattr(self, f'pnet_bottleneck_{i+1}')
                 cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck1_{i+1}')
             if i > 1:
-                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck2_{i+1}')
+                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck2_{i-1}')
             #cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck_{i+1}')
 
             # get s_pnet from p and transform
-            if i == 3:
+            if i == 2:
                 if gamma is None:               # not in test_mix
                     s, gamma, beta = self.simple_spade(s)
                     weight = self.get_weight(mask_c, mask_s, c_tnet, s, diff_c, diff_s)
