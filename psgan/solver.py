@@ -238,6 +238,7 @@ class Solver(Track):
                 category = [1]
                 a = torch.tensor(category)
                 b = a.type(torch.long)
+                b = b.to(self.device)
                 out = self.D_A(image_r, b)
                 self.track("D_A")
                 #d_loss_real = self.criterionGAN(out, True)
