@@ -5,6 +5,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from torchvision.models import VGG as TVGG
 from torchvision.models.vgg import load_state_dict_from_url, model_urls, cfgs
 
@@ -451,9 +452,11 @@ class Discriminator(nn.Module):
         blocks += [nn.Conv2d(dim_out, num_domains, 1, 1, 0)]
         self.main = nn.Sequential(*blocks)
 
-    def forward(self, x):
+    def forward(self, x, y):
         out = self.main(x)
-        out = out.view(out.size(0), -1)
+        out = out.view(out.size(0), -1)  #(batch, num_domains)
+        idx = torch.LongTensor(range(y.size(0))).to(y.device)
+        out = out[idx, y]
         return out
 '''
 class Discriminator(nn.Module):

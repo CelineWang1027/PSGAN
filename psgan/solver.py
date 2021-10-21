@@ -97,8 +97,10 @@ class Solver(Track):
 
     def build_model(self):
         # self.G = net.Generator()
-        self.D_A = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
-        self.D_B = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
+        #self.D_A = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
+        #self.D_B = net.Discriminator(self.img_size, self.d_conv_dim, self.d_repeat_num, self.norm)
+        self.D_A = net.Discriminator()
+        self.D_B = net.Discriminator()
 
         self.G.apply(self.weights_init_xavier)
         self.D_A.apply(self.weights_init_xavier)
@@ -230,8 +232,11 @@ class Solver(Track):
 
                 # ================== Train D ================== #
                 # training D_A, D_A aims to distinguish class B
-                # Real
-                out = self.D_A(image_r)
+                # with Real images
+                category = [1]
+                a = torch.tensor(category)
+                b = a.type(torch.long)
+                out = self.D_A(image_r, b)
                 self.track("D_A")
                 d_loss_real = self.criterionGAN(out, True)
                 self.track("D_A_loss")
@@ -239,7 +244,7 @@ class Solver(Track):
                 fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
                 self.track("G")
                 fake_A = Variable(fake_A.data).detach()
-                out = self.D_A(fake_A)
+                out = self.D_A(fake_A, b)
                 self.track("D_A_2")
                 d_loss_fake = self.criterionGAN(out, False)
                 self.track("D_A_loss_2")
@@ -256,14 +261,14 @@ class Solver(Track):
 
                 # training D_B, D_B aims to distinguish class A
                 # Real
-                out = self.D_B(image_s)
+                out = self.D_B(image_s, b)
                 d_loss_real = self.criterionGAN(out, True)
                 # Fake
                 self.track("G-before")
                 fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
-                out = self.D_B(fake_B)
+                out = self.D_B(fake_B, b)
                 d_loss_fake = self.criterionGAN(out, False)
 
                 # Backward + Optimize
@@ -295,12 +300,12 @@ class Solver(Track):
                     # GAN loss D_A(G_A(A))
                     # fake_A in class B,
                     fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
-                    pred_fake = self.D_A(fake_A)
+                    pred_fake = self.D_A(fake_A, b)
                     g_A_loss_adv = self.criterionGAN(pred_fake, True)
 
                     # GAN loss D_B(G_B(B))
                     fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
-                    pred_fake = self.D_B(fake_B)
+                    pred_fake = self.D_B(fake_B, b)
                     g_B_loss_adv = self.criterionGAN(pred_fake, True)
 
                     # self.track("Generator forward")
@@ -539,3 +544,21 @@ class Solver(Track):
             return Variable(x, requires_grad=requires_grad)
         else:
             return Variable(x)
+
+def adv_loss(logits, target):
+    assert target in[1, 0]
+    targets = torch.full_like(logits, fill_value=target)
+    loss = F.binary_cross_entropy_with_logits(logits, targets)
+    return loss
+
+def r1_reg(d_out, x_in):
+    #zero-centered gradient penalty for real images
+    batch_size = x_in.size(0)
+    grad_dout = torch.autograd.grad(
+        outputs=d_out.sum(), inputs=x_in,
+        create_graph=True, retain_graph=True, only_inputs=True
+    )[0]
+    grad_dout2 = grad_dout.pow(2)
+    assert(grad_dout2.size() == x_in.size())
+    reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
+    return reg
