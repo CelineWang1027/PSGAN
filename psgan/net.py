@@ -121,6 +121,7 @@ class AdainResBlk(nn.Module):
         x = self.norm1(x)
         x = self.actv(x)
         if self.upsample:
+            #nearest-neighbor interpolation
             x = F.interpolate(x, scale_factor=2, mode='nearest')
         x = self.conv1(x)
         x = self.norm2(x)
