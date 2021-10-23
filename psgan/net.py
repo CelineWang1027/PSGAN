@@ -88,6 +88,7 @@ class AdainResBlk(nn.Module):
         self.norm1 = AdaIN(style_dim, dim_in)
         self.norm2 = AdaIN(style_dim, dim_out)
         '''
+        
         self.norm1 = nn.InstanceNorm2d(dim_in, affine=False)
         self.norm2 = nn.InstanceNorm2d(dim_out, affine=False)
         if self.learned_sc:
