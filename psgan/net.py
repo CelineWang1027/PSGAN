@@ -436,13 +436,13 @@ class Generator(nn.Module, Track):
         return c_tnet
 
 class Discriminator(nn.Module):
-    def __init__(self, img_size=256, num_domains=2, max_conv_dim=512):
+    def __init__(self, img_size=256, num_domains=1, max_conv_dim=512):
         super().__init__()
         dim_in = 2**14 // img_size
         blocks = []
         blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
         #repeat_num = int(np.log2(img_size)) - 2
-        repeat_num = 3
+        repeat_num = 2
         for _ in range(repeat_num):
             dim_out = min(dim_in*2, max_conv_dim)
             blocks += [ResBlk(dim_in, dim_out, downsample=True)]
