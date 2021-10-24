@@ -130,6 +130,7 @@ class Solver(Track):
 
         if torch.cuda.is_available():
             self.device = "cuda"
+            #self.device = device
             if torch.cuda.device_count() > 1:
                 self.G = nn.DataParallel(self.G)
                 self.D_A = nn.DataParallel(self.D_A)
@@ -235,6 +236,7 @@ class Solver(Track):
                 # ================== Train D ================== #
                 # training D_A, D_A aims to distinguish class B
                 # with Real images
+                #Source target: 0, reference target: 1
                 category = [1]
                 a = torch.tensor(category)
                 b = a.type(torch.long)
@@ -267,9 +269,13 @@ class Solver(Track):
                 #self.loss['D-A-loss_real'] = d_loss_real.mean().item()
                 self.loss['D-A-loss_real'] = d_loss_real.mean().item()
 
+                category2 = [0]
+                a2 = torch.tensor(category2)
+                b2 = a.type(torch.long)
+                b2 = b.to(self.device)
                 # training D_B, D_B aims to distinguish class A
                 # with Real images
-                out = self.D_B(image_s, b)
+                out = self.D_B(image_s, b2)
                 #d_loss_real = self.criterionGAN(out, True)
                 d_loss_real = adv_loss(out, 1)
                 d_loss_reg = r1_reg(out, image_s)
@@ -278,7 +284,7 @@ class Solver(Track):
                 fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
-                out = self.D_B(fake_B, b)
+                out = self.D_B(fake_B, b2)
                 #d_loss_fake = self.criterionGAN(out, False)
                 d_loss_fake = adv_loss(out, 0)
 
@@ -318,7 +324,7 @@ class Solver(Track):
 
                     # GAN loss D_B(G_B(B))
                     fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
-                    pred_fake = self.D_B(fake_B, b)
+                    pred_fake = self.D_B(fake_B, b2)
                     #g_B_loss_adv = self.criterionGAN(pred_fake, True)
                     g_B_loss_adv = adv_loss(pred_fake, 1)
 

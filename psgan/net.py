@@ -72,6 +72,47 @@ class ResBlk(nn.Module):
         x = self._shortcut(x) + self._residual(x)
         return x / math.sqrt(2)
 
+class ResBlk2(nn.Module):
+    def __init__(self, dim_in, dim_out, actv=nn.LeakyReLU(0.2), normalize=False, downsample=False):
+        super().__init__()
+        self.actv = actv
+        self.normalize = normalize
+        self.downsample = downsample
+        self.learned_sc = dim_in != dim_out
+        self._build_weights(dim_in, dim_out)
+
+    def _build_weights(self, dim_in, dim_out):
+        self.conv1 = nn.Conv2d(dim_in, dim_in, 3, 1, 1)
+        self.conv2 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
+        if self.normalize:
+            self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
+            self.norm2 = nn.InstanceNorm2d(dim_in, affine=True)
+        if self.learned_sc:
+            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
+
+    def _shortcut(self, x):
+        if self.learned_sc:
+            x = self.conv1x1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 4)
+        return x
+
+    def _residual(self, x):
+        if self.normalize:
+            x = self.norm1(x)
+        x = self.actv(x)
+        x = self.conv1(x)
+        if self.downsample:
+            x = F.avg_pool2d(x, 4)
+        if self.normalize:
+            x = self.norm2(x)
+        x = self.actv(x)
+        x = self.conv2(x)
+        return x
+
+    def forward(self, x):
+        x = self._shortcut(x) + self._residual(x)
+        return x / math.sqrt(2)
 
 class AdainResBlk(nn.Module):
     def __init__(self, dim_in, dim_out, style_dim=64, w_wpf=0, actv=nn.LeakyReLU(0.2), upsample=False):
@@ -238,7 +279,7 @@ class Generator(nn.Module, Track):
         self.atten_bottleneck_b = NONLocalBlock2D()
         self.simple_spade = GetMatrix(curr_dim, 1)      # get the makeup matrix
 
-        for i in range(2):
+        for i in range(3):
             #setattr(self, f'pnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='p'))
             setattr(self, f'pnet_bottleneck_{i+1}', ResBlk(curr_dim, curr_dim, normalize=True))
 
@@ -262,10 +303,10 @@ class Generator(nn.Module, Track):
             curr_dim = curr_dim * 2
 
         # Bottleneck
-        for i in range(2):
+        for i in range(3):
             #setattr(self, f'tnet_bottleneck_{i+1}', ResidualBlock(dim_in=curr_dim, dim_out=curr_dim, net_mode='t'))
             setattr(self, f'tnet_bottleneck1_{i+1}', ResBlk(curr_dim, curr_dim, normalize=True))
-        for i in range(2):
+        for i in range(3):
             setattr(self, f'tnet_bottleneck2_{i+1}', AdainResBlk(curr_dim, curr_dim, 64, w_wpf=0))
 
         # Up-Sampling
@@ -437,19 +478,21 @@ class Generator(nn.Module, Track):
         return c_tnet
 
 class Discriminator(nn.Module):
-    def __init__(self, img_size=256, num_domains=1, max_conv_dim=512):
+    def __init__(self, img_size=256, num_domains=2, max_conv_dim=512):
         super().__init__()
         dim_in = 2**14 // img_size
         blocks = []
         blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
         #repeat_num = int(np.log2(img_size)) - 2
-        repeat_num = 2
+        repeat_num = 3
         for _ in range(repeat_num):
             dim_out = min(dim_in*2, max_conv_dim)
-            blocks += [ResBlk(dim_in, dim_out, downsample=True)]
+            blocks += [ResBlk2(dim_in, dim_out, downsample=True)]
             dim_in = dim_out
+
         blocks += [nn.LeakyReLU(0.2)]
         blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+
         blocks += [nn.LeakyReLU(0.2)]
         blocks += [nn.Conv2d(dim_out, num_domains, 1, 1, 0)]
         self.main = nn.Sequential(*blocks)
