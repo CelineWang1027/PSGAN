@@ -245,8 +245,8 @@ class Solver(Track):
                 b = b.to(self.device)
                 out = self.D_A(image_r, b)
                 self.track("D_A")
-                #d_loss_real = self.criterionGAN(out, True)
-                d_loss_real = adv_loss(out, 1)
+                d_loss_real = self.criterionGAN(out, True)
+                #d_loss_real = adv_loss(out, 1)
                 d_loss_reg = r1_reg(out, image_r)
                 self.track("D_A_loss")
                 # with Fake images
@@ -255,13 +255,13 @@ class Solver(Track):
                 fake_A = Variable(fake_A.data).detach()
                 out = self.D_A(fake_A, b)
                 self.track("D_A_2")
-                #d_loss_fake = self.criterionGAN(out, False)
-                d_loss_fake = adv_loss(out, 0)
+                d_loss_fake = self.criterionGAN(out, False)
+                #d_loss_fake = adv_loss(out, 0)
                 self.track("D_A_loss_2")
 
                 # Backward + Optimize
                 #d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
-                d_loss = d_loss_real + d_loss_fake + d_loss_reg
+                d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_A_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_A_optimizer.step()
@@ -278,8 +278,8 @@ class Solver(Track):
                 # training D_B, D_B aims to distinguish class A
                 # with Real images
                 out = self.D_B(image_s, b2)
-                #d_loss_real = self.criterionGAN(out, True)
-                d_loss_real = adv_loss(out, 1)
+                d_loss_real = self.criterionGAN(out, True)
+                #d_loss_real = adv_loss(out, 1)
                 d_loss_reg = r1_reg(out, image_s)
                 # Fake
                 self.track("G-before")
@@ -287,12 +287,12 @@ class Solver(Track):
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
                 out = self.D_B(fake_B, b2)
-                #d_loss_fake = self.criterionGAN(out, False)
-                d_loss_fake = adv_loss(out, 0)
+                d_loss_fake = self.criterionGAN(out, False)
+                #d_loss_fake = adv_loss(out, 0)
 
                 # Backward + Optimize
                 #d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
-                d_loss = d_loss_real + d_loss_fake + d_loss_reg
+                d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_B_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_B_optimizer.step()
@@ -321,14 +321,14 @@ class Solver(Track):
                     # fake_A in class B,
                     fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
                     pred_fake = self.D_A(fake_A, b)
-                    #g_A_loss_adv = self.criterionGAN(pred_fake, True)
-                    g_A_loss_adv = adv_loss(pred_fake, 1)
+                    g_A_loss_adv = self.criterionGAN(pred_fake, True)
+                    #g_A_loss_adv = adv_loss(pred_fake, 1)
 
                     # GAN loss D_B(G_B(B))
                     fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
                     pred_fake = self.D_B(fake_B, b2)
-                    #g_B_loss_adv = self.criterionGAN(pred_fake, True)
-                    g_B_loss_adv = adv_loss(pred_fake, 1)
+                    g_B_loss_adv = self.criterionGAN(pred_fake, True)
+                    #g_B_loss_adv = adv_loss(pred_fake, 1)
 
                     # self.track("Generator forward")
 
@@ -569,6 +569,11 @@ class Solver(Track):
 
 def adv_loss(logits, target):
     assert target in[1, 0]
+    '''
+    create a matrix:
+    size: logits
+    value: target
+    '''
     targets = torch.full_like(logits, fill_value=target)
     loss = F.binary_cross_entropy_with_logits(logits, targets)
     return loss
