@@ -19,6 +19,28 @@ from concern.track import Track
 # that has the same size as the input
 
 class AdaIN(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def mu(self, x):
+        """ Takes a (n,c,h,w) tensor as input and returns the average across
+        it's spatial dimensions as (h,w) tensor [See eq. 5 of paper]"""
+        return torch.sum(x,(2,3))/(x.shape[2]*x.shape[3])
+
+    def sigma(self, x):
+        """ Takes a (n,c,h,w) tensor as input and returns the standard deviation
+        across it's spatial dimensions as (h,w) tensor [See eq. 6 of paper] Note
+        the permutations are required for broadcasting"""
+        return torch.sqrt((torch.sum((x.permute([2,3,0,1])-self.mu(x)).permute([2,3,0,1])**2,(2,3))+0.000000023)/(x.shape[2]*x.shape[3]))
+
+    def forward(self, x, y):
+        """ Takes a content embeding x and a style embeding y and changes
+        transforms the mean and standard deviation of the content embedding to
+        that of the style. [See eq. 8 of paper] Note the permutations are
+        required for broadcasting"""
+        return (self.sigma(y)*((x.permute([2,3,0,1])-self.mu(x))/self.sigma(x)) + self.mu(y)).permute([2,3,0,1])
+'''
+class AdaIN(nn.Module):
     def __init__(self, style_num, num_features):
         super().__init__()
         self.norm = nn.InstanceNorm2d(num_features, affine=False)
@@ -29,7 +51,7 @@ class AdaIN(nn.Module):
         h = h.view(h.size(0), h.size(1), 1, 1)
         gamma, beta = torch.chunk(h, chunks=2, dim=1)
         return (1 + gamma) * self.norm(x) + beta
-
+'''
 class ResBlk(nn.Module):
     def __init__(self, dim_in, dim_out, actv=nn.LeakyReLU(0.2), normalize=False, downsample=False):
         super().__init__()
@@ -130,8 +152,10 @@ class AdainResBlk(nn.Module):
         self.norm1 = AdaIN(style_dim, dim_in)
         self.norm2 = AdaIN(style_dim, dim_out)
         '''
-        self.norm1 = nn.InstanceNorm2d(dim_in, affine=False)
-        self.norm2 = nn.InstanceNorm2d(dim_out, affine=False)
+        #self.norm1 = nn.InstanceNorm2d(dim_in, affine=False)
+        #self.norm2 = nn.InstanceNorm2d(dim_out, affine=False)
+        self.norm1 = AdaIN()
+        self.norm2 = AdaIN()
         if self.learned_sc:
             self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
 
@@ -159,19 +183,19 @@ class AdainResBlk(nn.Module):
         return out
     '''
     def _residual(self, x):
-        x = self.norm1(x)
+        x = self.norm1(x, y)
         x = self.actv(x)
         if self.upsample:
             #nearest-neighbor interpolation
             x = F.interpolate(x, scale_factor=2, mode='nearest')
         x = self.conv1(x)
-        x = self.norm2(x)
+        x = self.norm2(x, y)
         x = self.actv(x)
         x = self.conv2(x)
         return x
 
-    def forward(self, x):
-        out = self._residual(x)
+    def forward(self, x, y):
+        out = self._residual(x, y)
         if self.w_hpf == 0:
             out = (out + self._shortcut(x)) / math.sqrt(2)
         return out
@@ -471,7 +495,7 @@ class Generator(nn.Module, Track):
             c_tnet = cur_tnet_up_relu(c_tnet)
             '''
             cur_tnet_up = getattr(self, f'tnet_up_{i+1}')
-            c_tnet = cur_tnet_up(c_tnet)
+            c_tnet = cur_tnet_up(c_tnet, s)
         self.track("upsampling")
 
         c_tnet = self.tnet_out(c_tnet)
