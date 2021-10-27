@@ -38,6 +38,12 @@ class AdaIN(nn.Module):
         transforms the mean and standard deviation of the content embedding to
         that of the style. [See eq. 8 of paper] Note the permutations are
         required for broadcasting"""
+        '''
+        print('the size of x is')
+        print(x.size())
+        print('the size of y is')
+        print(y.size())
+        '''
         return (self.sigma(y)*((x.permute([2,3,0,1])-self.mu(x))/self.sigma(x)) + self.mu(y)).permute([2,3,0,1])
 '''
 class AdaIN(nn.Module):
@@ -182,13 +188,14 @@ class AdainResBlk(nn.Module):
             out = (out + self._shortcut(x)) / math.sqrt(2)
         return out
     '''
-    def _residual(self, x):
+    def _residual(self, x, y):
         x = self.norm1(x, y)
         x = self.actv(x)
         if self.upsample:
             #nearest-neighbor interpolation
             x = F.interpolate(x, scale_factor=2, mode='nearest')
         x = self.conv1(x)
+        y = self.conv1(y)
         x = self.norm2(x, y)
         x = self.actv(x)
         x = self.conv2(x)
@@ -481,7 +488,10 @@ class Generator(nn.Module, Track):
             if gamma is None and i <= 2:
                 s = cur_pnet_bottleneck(s)
                 #c_tnet = cur_tnet_bottleneck(c_tnet)
-            c_tnet = cur_tnet_bottleneck(c_tnet)
+            if i <= 1:
+                c_tnet = cur_tnet_bottleneck(c_tnet)
+            if i > 1:
+                c_tnet = cur_tnet_bottleneck(c_tnet, c_tnet)
         self.track("bottleneck")
 
         # up-sampling
@@ -495,7 +505,7 @@ class Generator(nn.Module, Track):
             c_tnet = cur_tnet_up_relu(c_tnet)
             '''
             cur_tnet_up = getattr(self, f'tnet_up_{i+1}')
-            c_tnet = cur_tnet_up(c_tnet, s)
+            c_tnet = cur_tnet_up(c_tnet, c_tnet)
         self.track("upsampling")
 
         c_tnet = self.tnet_out(c_tnet)
