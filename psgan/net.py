@@ -519,7 +519,8 @@ class Discriminator(nn.Module):
         curr_dim = conv_dim
         for i in range(1, repeat_num):
             if norm=='SN':
-                layers.append(SpectralNorm(ResBlk(curr_dim, curr_dim*2, downsample=True)))
+                layers.append(ResBlk(curr_dim, curr_dim * 2, downsample=True))
+                #layers.append(SpectralNorm(ResBlk(curr_dim, curr_dim*2, downsample=True)))
                 #layers.append(SpectralNorm(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=4, stride=2, padding=1)))
             else:
                 layers.append(ResBlk(curr_dim, curr_dim*2, downsample=True))
