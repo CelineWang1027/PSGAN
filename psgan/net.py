@@ -476,7 +476,7 @@ class Generator(nn.Module, Track):
 
         c_tnet = self.tnet_out(c_tnet)
         return c_tnet
-
+'''
 class Discriminator(nn.Module):
     def __init__(self, img_size=256, num_domains=2, max_conv_dim=256):
         super().__init__()
@@ -519,10 +519,12 @@ class Discriminator(nn.Module):
         curr_dim = conv_dim
         for i in range(1, repeat_num):
             if norm=='SN':
-                layers.append(SpectralNorm(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=4, stride=2, padding=1)))
+                layers.append(SpectralNorm(ResBlk(curr_dim, curr_dim*2, downsample=True)))
+                #layers.append(SpectralNorm(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=4, stride=2, padding=1)))
             else:
-                layers.append(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=4, stride=2, padding=1))
-            layers.append(nn.LeakyReLU(0.01, inplace=True))
+                layers.append(ResBlk(curr_dim, curr_dim*2, downsample=True))
+                #layers.append(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=4, stride=2, padding=1))
+            #layers.append(nn.LeakyReLU(0.01, inplace=True))
             curr_dim = curr_dim * 2
 
         #k_size = int(image_size / np.power(2, repeat_num))
@@ -552,7 +554,7 @@ class Discriminator(nn.Module):
         out_makeup = self.conv1(h)
         #return out_real.squeeze(), out_makeup.squeeze()
         return out_makeup
-'''
+
 class VGG(nn.Module):
     def __init__(self, pool='max'):
         super(VGG, self).__init__()
