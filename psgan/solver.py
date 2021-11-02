@@ -270,6 +270,7 @@ class Solver(Track):
                 self.loss = {}
                 #self.loss['D-A-loss_real'] = d_loss_real.mean().item()
                 self.loss['D-A-loss_real'] = d_loss_real.mean().item()
+                self.loss['D-A-loss_fake'] = d_loss_fake.mean().item()
 
                 category2 = [0]
                 a2 = torch.tensor(category2)
@@ -299,6 +300,7 @@ class Solver(Track):
 
                 # Logging
                 self.loss['D-B-loss_real'] = d_loss_real.mean().item()
+                self.loss['D-B-loss_fake'] = d_loss_fake.mean().item()
 
                 # self.track("Discriminator backward")
 
