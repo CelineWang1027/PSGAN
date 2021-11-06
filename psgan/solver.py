@@ -235,7 +235,9 @@ class Solver(Track):
                 # Real
                 out = self.D_A(image_r)
                 self.track("D_A")
-                d_loss_real = self.criterionGAN(out, True)
+                #d_loss_real = self.criterionGAN(out, True)
+                d_loss_real = adv_loss(out, 1)
+                #d_loss_reg = r1_reg(out, image_r)
                 self.track("D_A_loss")
                 # Fake
                 fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
@@ -243,11 +245,13 @@ class Solver(Track):
                 fake_A = Variable(fake_A.data).detach()
                 out = self.D_A(fake_A)
                 self.track("D_A_2")
-                d_loss_fake = self.criterionGAN(out, False)
+                #d_loss_fake = self.criterionGAN(out, False)
+                d_loss_fake = adv_loss(out, 0)
                 self.track("D_A_loss_2")
 
                 # Backward + Optimize
                 d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                #d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_A_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_A_optimizer.step()
@@ -259,17 +263,21 @@ class Solver(Track):
                 # training D_B, D_B aims to distinguish class A
                 # Real
                 out = self.D_B(image_s)
-                d_loss_real = self.criterionGAN(out, True)
+                #d_loss_real = self.criterionGAN(out, True)
+                d_loss_real = adv_loss(out, 1)
+                #d_loss_reg = r1_reg(out, image_s)
                 # Fake
                 self.track("G-before")
                 fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
                 self.track("G-2")
                 fake_B = Variable(fake_B.data).detach()
                 out = self.D_B(fake_B)
-                d_loss_fake = self.criterionGAN(out, False)
+                #d_loss_fake = self.criterionGAN(out, False)
+                d_loss_fake = adv_loss(out, 0)
 
                 # Backward + Optimize
                 d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                #d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_B_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_B_optimizer.step()
@@ -298,12 +306,14 @@ class Solver(Track):
                     # fake_A in class B,
                     fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
                     pred_fake = self.D_A(fake_A)
-                    g_A_loss_adv = self.criterionGAN(pred_fake, True)
+                    #g_A_loss_adv = self.criterionGAN(pred_fake, True)
+                    g_A_loss_adv = adv_loss(pred_fake, 1)
 
                     # GAN loss D_B(G_B(B))
                     fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
                     pred_fake = self.D_B(fake_B)
-                    g_B_loss_adv = self.criterionGAN(pred_fake, True)
+                    #g_B_loss_adv = self.criterionGAN(pred_fake, True)
+                    g_B_loss_adv = adv_loss(pred_fake, 1)
 
                     # self.track("Generator forward")
 
@@ -541,3 +551,27 @@ class Solver(Track):
             return Variable(x, requires_grad=requires_grad)
         else:
             return Variable(x)
+
+
+def adv_loss(logits, target):
+    assert target in[1, 0]
+    '''
+    create a matrix:
+    size: logits
+    value: target
+    '''
+    targets = torch.full_like(logits, fill_value=target)
+    loss = F.binary_cross_entropy_with_logits(logits, targets)
+    return loss
+
+def r1_reg(d_out, x_in):
+    #zero-centered gradient penalty for real images
+    batch_size = x_in.size(0)
+    grad_dout = torch.autograd.grad(
+        outputs=d_out.sum(), inputs=x_in,
+        create_graph=True, retain_graph=True, only_inputs=True
+    )[0]
+    grad_dout2 = grad_dout.pow(2)
+    assert(grad_dout2.size() == x_in.size())
+    reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
+    return reg
