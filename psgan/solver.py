@@ -15,6 +15,7 @@ from torchvision.utils import save_image
 import torch.nn.init as init
 from torch.autograd import Variable
 from torchgpipe import GPipe
+import torch.nn.functional as F
 
 from ops.loss_added import GANLoss
 from ops.histogram_loss import HistogramLoss
