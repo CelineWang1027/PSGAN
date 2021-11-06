@@ -236,6 +236,7 @@ class Solver(Track):
                 out = self.D_A(image_r)
                 self.track("D_A")
                 d_loss_real = self.criterionGAN(out, True)
+                d_loss_reg = r1_reg(out, image_r)
                 self.track("D_A_loss")
                 # Fake
                 fake_A = self.G(image_s, image_r, mask_s, mask_r, dist_s, dist_r)
@@ -247,7 +248,8 @@ class Solver(Track):
                 self.track("D_A_loss_2")
 
                 # Backward + Optimize
-                d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                #d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_A_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_A_optimizer.step()
@@ -260,6 +262,7 @@ class Solver(Track):
                 # Real
                 out = self.D_B(image_s)
                 d_loss_real = self.criterionGAN(out, True)
+                d_loss_reg = r1_reg(out, image_s)
                 # Fake
                 self.track("G-before")
                 fake_B = self.G(image_r, image_s, mask_r, mask_s, dist_r, dist_s)
@@ -269,7 +272,8 @@ class Solver(Track):
                 d_loss_fake = self.criterionGAN(out, False)
 
                 # Backward + Optimize
-                d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                #d_loss = (d_loss_real.mean() + d_loss_fake.mean()) * 0.5
+                d_loss = (d_loss_real.mean() + d_loss_fake.mean() + d_loss_reg.mean()) * 0.5
                 self.d_B_optimizer.zero_grad()
                 d_loss.backward(retain_graph=False)
                 self.d_B_optimizer.step()
@@ -541,3 +545,15 @@ class Solver(Track):
             return Variable(x, requires_grad=requires_grad)
         else:
             return Variable(x)
+
+def r1_reg(d_out, x_in):
+    #zero-centered gradient penalty for real images
+    batch_size = x_in.size(0)
+    grad_dout = torch.autograd.grad(
+        outputs=d_out.sum(), inputs=x_in,
+        create_graph=True, retain_graph=True, only_inputs=True
+    )[0]
+    grad_dout2 = grad_dout.pow(2)
+    assert(grad_dout2.size() == x_in.size())
+    reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
+    return reg
