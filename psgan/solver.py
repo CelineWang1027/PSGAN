@@ -149,16 +149,18 @@ class Solver(Track):
 
     def vgg_forward(self, model, x):
         # print('the features of ptrtrained vgg16 model is')
-        #features = torch.nn.Sequential(*list(model.children())[:28])
+        features = torch.nn.Sequential(*list(model.children())[:28])
         # print(feature)
         # print('the kets of ptrtrained vgg16 model is')
         # print(model._modules.keys())
         # for i in range(18):
         #    x = model.features[i](x)
         # output the features extracted by 0-28 layers of pretrained vgg16
-        #x = features(x)
+        x = features(x)
+        '''
         for i in range(18):
             x = model.features[i](x)
+        '''
         return x
 
 
