@@ -433,16 +433,16 @@ class Generator(nn.Module, Track):
         self.track("downsampling")
 
         # bottleneck
-        for i in range(4):
-            if gamma is None and i <= 1:
+        for i in range(6):
+            if gamma is None and i <= 2:
                 cur_pnet_bottleneck = getattr(self, f'pnet_bottleneck_{i+1}')
                 cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck1_{i+1}')
-            if i > 1:
-                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck2_{i-1}')
-            #cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck_{i+1}')
+            if i > 2:
+                cur_tnet_bottleneck = getattr(self, f'tnet_bottleneck2_{i-2}')
+            #cur_tnet_bottleneck = cur_tnet_bottleneck
 
             # get s_pnet from p and transform
-            if i == 2:
+            if i == 3:
                 if gamma is None:               # not in test_mix
                     s, gamma, beta = self.simple_spade(s)
                     weight = self.get_weight(mask_c, mask_s, c_tnet, s, diff_c, diff_s)
@@ -457,7 +457,11 @@ class Generator(nn.Module, Track):
             if gamma is None and i <= 2:
                 s = cur_pnet_bottleneck(s)
                 #c_tnet = cur_tnet_bottleneck(c_tnet)
-            c_tnet = cur_tnet_bottleneck(c_tnet)
+                c_tnet = cur_tnet_bottleneck(c_tnet)
+            if i > 2:
+                c_tnet = cur_tnet_bottleneck(c_tnet)
+
+
         self.track("bottleneck")
 
         # up-sampling

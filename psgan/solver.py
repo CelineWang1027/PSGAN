@@ -206,10 +206,13 @@ class Solver(Track):
     def test(self, real_A, mask_A, diff_A, real_B, mask_B, diff_B):
         cur_prama = None
         with torch.no_grad():
+            '''
             cur_prama = self.generate(real_A, real_B, None, None, mask_A, mask_B,
                                       diff_A, diff_B, ret=True)
             fake_A = self.generate(real_A, real_B, None, None, mask_A, mask_B,
                                    diff_A, diff_B, gamma=cur_prama[0], beta=cur_prama[1])
+            '''
+            fake_A=self.generate(real_A, real_B, None, None, mask_A, mask_B, diff_A, diff_B)
         fake_A = fake_A.squeeze(0)
 
         # normalize
